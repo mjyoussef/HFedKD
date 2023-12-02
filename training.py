@@ -1,8 +1,11 @@
 import json
+import torch
 import copy
 import numpy as np
 import argparse
-from utils import LocalUpdate, average_weights
+from utils import LocalUpdate, average_weights, inference
+from data_loader import load_client_config
+from torch.nn import functional as F
 
 def parse_data_config(path):
     clients_dict_lsts = json.load(path)
@@ -36,8 +39,11 @@ def train_isolated(args, groups, group_size, user_models, trainset, valset, data
 
         updater = LocalUpdate(user_args, trainset)
         model = user_models[client]
-        loss[groups[client]] += updater.update_weights(model)
-        acc[groups[client]] += updater.inference(model, valset=valset)
+        _, l = updater.update_weights(model)
+        loss[groups[client]] += l
+
+        acc_client, l_client = updater.inference(model, valset=valset)
+        acc[groups[client]] += acc_client
     
     for key in loss:
         loss[key] /= group_size
@@ -63,7 +69,9 @@ def train_clustered(args, groups, group_size, user_models, trainset, valset, dat
         model = user_models[client]
         w, l = updater.update_weights(model)
         loss[groups[client]] += l
-        acc[groups[client]] += updater.inference(model, valset=valset)
+
+        acc_client, l_client = updater.inference(model, valset=valset)
+        acc[groups[client]] += acc_client
 
         lsts = weights_map.get(groups[client], [[], []])
         client_lst = lsts[0] + [client]
@@ -85,8 +93,73 @@ def train_clustered(args, groups, group_size, user_models, trainset, valset, dat
     
     return loss, acc
 
-def train_fedhat():
-    pass
+def train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
+    if (dataset_name == 'CIFAR10'):
+        clients_dict = clients_dict_cifar
+    else:
+        clients_dict = clients_dict_ag
+
+    student_model.train()
+    if (args.optimizer == 'sgd'):
+        student_optimizer = torch.optim.SGD(student_model.parameters(), lr=args.lr, momentum=0.5)
+
+    if (args.optimizer == 'adam'):
+        student_optimizer = torch.optim.Adam(student_model.parameters(), lr=args.lr, weight_decay=1e-4)
+    
+    loss = {}
+    acc = {}
+    for client in range(num_clients):
+        model = user_models[client]
+
+        trainloader, testloader = load_client_config(clients_dict, trainset, client, args.local_bs, args.train_ratio)
+
+        if (args.optimizer == 'sgd'):
+            teacher_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.5)
+
+        if (args.optimizer == 'adam'):
+            teacher_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+
+        epoch_loss = []
+        for epoch in range(args.local_ep):
+            batch_loss = []
+            for batch, (X, y) in enumerate(trainloader):
+                X, y = X.to(args.device), y.to(args.device)
+
+                pred_s = student_model(X)
+                pred_t = model(X)
+
+                task_loss_s = F.nll_loss(pred_s, y)
+                task_loss_t = F.nll_loss(pred_t, y)
+
+                distill_loss_s = F.kl_div(pred_t, pred_s) / (task_loss_s + task_loss_t)
+                distill_loss_t = F.kl_div(pred_s, pred_t) / (task_loss_s + task_loss_t)
+
+                output_t = task_loss_t + distill_loss_t
+                output_s = task_loss_s + distill_loss_s
+
+                output_t.backward()
+                teacher_optimizer.step()
+                teacher_optimizer.zero_grad()
+
+                batch_loss += [copy.deepcopy(output_t.item())]
+
+                output_s.backward()
+                student_optimizer.step()
+                student_optimizer.zero_grad()
+            
+            epoch_loss += [sum(batch_loss) / len(batch_loss)]
+            if (args.logging):
+                print(f"Client: {client} / Epoch: {epoch} / Loss: {epoch_loss[-1]}")
+
+        task_loss_fn = F.nll_loss()
+        acc_client, l_client = inference(model, args.device, task_loss_fn, testloader)
+        loss[groups[client]] += epoch_loss[-1]
+        acc[groups[client]] += acc_client
+
+    for group in loss:
+        loss[group] /= group_size
+        acc[group] /= group_size
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

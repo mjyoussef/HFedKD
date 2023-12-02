@@ -18,12 +18,12 @@ class LocalUpdate(object):
         self.loss = nn.NLLLoss().to(self.device)
     
     def update_weights(self, model):
-        model.train()
+        model.train(True)
 
         if self.args.optimizer == 'sgd':
             optimizer = torch.optim.SGD(model.parameters(), lr=self.args.lr,
                                         momentum=0.5)
-        elif self.args.optimizer == 'adam':
+        if self.args.optimizer == 'adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=self.args.lr,
                                          weight_decay=1e-4)
             
@@ -54,22 +54,26 @@ class LocalUpdate(object):
         else:
             testloader = DataLoader(testset, batch_size=int(len(testset)/10), shuffle=False)
         
-        model.eval()
-        batch_loss, total, correct = [], 0.0, 0.0
+        return inference(model, self.device, self.loss, testloader)
 
+def inference(model, device, loss, testloader):
+    model.eval(True)
+    batch_loss, total, correct = [], 0.0, 0.0
+
+    with torch.no_grad():
         for batch, (X, y) in enumerate(testloader):
-            X, y = X.to(self.device), y.to(self.device)
+            X, y = X.to(device), y.to(device)
 
             pred = model(X)
-            loss = self.loss(pred, y)
+            loss = loss(pred, y)
             batch_loss += [copy.deepcopy(loss.item())]
 
             _, pred_labels = torch.max(pred, 1)
             pred_labels = pred_labels.view(-1)
             correct += torch.sum(torch.eq(pred_labels, y)).item()
             total += len(y)
-        
-        return correct / total, sum(batch_loss) / len(batch_loss)
+    
+    return correct / total, sum(batch_loss) / len(batch_loss)
     
 def average_weights(w):
     """
