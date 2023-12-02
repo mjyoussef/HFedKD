@@ -1,8 +1,11 @@
 from torch.utils.data import DataLoader, Dataset
+from torchvision import datasets
+from torchvision.transforms import ToTensor
 import torch
 import json
 import csv
 import numpy as np
+import argparse
 
 class DatasetSplit(Dataset):
     """An abstract Dataset class wrapped around Pytorch Dataset class.
@@ -19,7 +22,7 @@ class DatasetSplit(Dataset):
         image, label = self.dataset[self.idxs[item]]
         return torch.tensor(image), torch.tensor(label)
 
-class AGNEWs(Dataset):
+class AGNEWS(Dataset):
     def __init__(self, label_data_path, alphabet_path, l0 = 1014):
         """Create AG's News dataset object.
 
@@ -79,31 +82,41 @@ class AGNEWs(Dataset):
         class_weight = [num_samples/float(self.label.count(c)) for c in label_set]    
         return class_weight, num_class
        
-def create_client_config(config_path, num_shards, num_users, dataset):
+def create_client_config(config_path, num_users, dataset, type):
     '''
     config_path: txt file for configs (one for CIFAR-10 and one for AG_NEWS)
+
+    allocates non-iid data samples for each client
     '''
+    num_shards = num_users * 2
     num_samples = len(dataset) // num_shards
     idx_shard = [i for i in range(num_shards)]
-    dict_users = {i: np.array([]) for i in range(num_users)}
-    idxs = np.arange(num_shards*num_samples)
-    labels = np.array(dataset.label)
+    dict_users = {i: np.array([], dtype=int) for i in range(num_users)}
+    idxs = np.arange(len(dataset))
+    if (type == 'CIFAR10'):
+        labels = np.array(dataset.targets)
+    else:
+        labels = np.array(dataset.label)
+        print(labels)
 
-    # sort labels
-    idxs_labels = np.vstack((idxs, labels))
-    idxs_labels = idxs_labels[:, idxs_labels[1, :].argsort()]
-    idxs = idxs_labels[0, :]
+    # sort by label
+    tups = np.vstack((labels, idxs)).T
+    tups = tups.tolist()
+    tups.sort()
+    tups = np.array(tups, dtype=int)
+    idxs = tups[:, 1]
 
     # divide and assign
+    dict_users_lsts = {}
     for i in range(num_users):
         rand_set = set(np.random.choice(idx_shard, 2, replace=False))
         idx_shard = list(set(idx_shard) - rand_set)
         for rand in rand_set:
-            dict_users[i] = np.concatenate(
-                (dict_users[i], idxs[rand*num_samples:(rand+1)*num_samples]), axis=0)
+            dict_users[i] = np.concatenate((dict_users[i], idxs[rand*num_samples:(rand+1)*num_samples]), axis=0)
+            dict_users_lsts[i] = dict_users[i].tolist()
     
-    with open(config_path, 'W') as file:
-        json.dump(dict_users, file)
+    with open(config_path, 'w') as file:
+        json.dump(dict_users_lsts, file)
 
 def load_client_config(config_path, dataset, client_id, bs, train_ratio=0.8, val_ratio=0.1):
     clients_dict = json.load(config_path)
@@ -123,13 +136,24 @@ def load_client_config(config_path, dataset, client_id, bs, train_ratio=0.8, val
     return trainloader, validloader, testloader
 
 if __name__ == '__main__':
-    label_data_path = 'data/ag_test.csv'
-    alphabet_path = 'data/alphabet.json'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config_path', type=str, required=True)
+    parser.add_argument('--num_users', type=int, required=True)
+    parser.add_argument('--dataset', type=str, required=True)
 
-    train_dataset = AGNEWs(label_data_path, alphabet_path)
-    train_loader = DataLoader(train_dataset, batch_size=64, num_workers=4, drop_last=False)
-
-    for i_batch, sample_batched in enumerate(train_loader):
-        if i_batch == 0:
-            print(sample_batched[0].shape)
-            break
+    args = parser.parse_args()
+    if (args.dataset == 'AG_NEWS'):
+        data_path = 'data/ag_train.csv'
+        alphabet_path = 'data/alphabet.json'
+        dataset = AGNEWS(data_path, alphabet_path)
+    elif (args.dataset == 'CIFAR10'):
+        dataset = datasets.CIFAR10(
+            root="data",
+            train=True,
+            download=True,
+            transform=ToTensor(),
+        )
+    else:
+        raise Exception('Invalid dataset provided')
+    
+    create_client_config(args.config_path, args.num_users, dataset, args.dataset)

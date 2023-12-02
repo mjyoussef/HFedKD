@@ -1,0 +1,5 @@
+**/.DS_Store
+/data/cifar_config.json
+/data/ag_news_config.json
+/data/cifar-10-python.tar.gz
+/data/cifar-10-batches-py
