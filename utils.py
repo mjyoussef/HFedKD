@@ -1,17 +1,19 @@
-
+import copy
 import torch
 from torch import nn
+from torch.utils.data import DataLoader
 from data_loader import load_client_config
+import copy
 
 class LocalUpdate(object):
     def __init__(self, args, dataset):
         # args: {gpu: boolean, optimizer: string, lr: float, local_bs: int, local_ep: int, logging: boolean, 
-        # client_id: int, client_data_config: string, train_ratio: float, val_ratio: float}
+        # client_id: int, clients_dict: np.array, train_ratio: float}
         self.args = args
         self.client_id = self.args.client_id
-        self.trainloader, self.validloader, self.testloader = \
-        load_client_config(self.args.client_data_config, dataset, self.args.client_id, self.args.bs, 
-                           train_ratio=self.args.train_ratio, val_ratio=self.args.val_ratio)
+        self.trainloader, self.testloader = \
+        load_client_config(self.args.clients_dict, dataset, self.args.client_id, self.args.bs, 
+                           train_ratio=self.args.train_ratio)
         self.device = 'cuda' if args.gpu else 'cpu'
         self.loss = nn.NLLLoss().to(self.device)
     
@@ -38,15 +40,19 @@ class LocalUpdate(object):
                 optimizer.step()
                 optimizer.zero_grad()
 
-                batch_loss += [loss.item()]
+                batch_loss += [copy.deepcopy(loss.item())]
             
             epoch_loss += [sum(batch_loss) / len(batch_loss)]
             if (self.args.logging):
                 print(f"Client: {self.client_id} / Epoch: {epoch} / Loss: {epoch_loss[-1]}")
+        
+        return model.state_dict(), epoch_loss[-1]
             
-    def inference(self, model, testloader=None):
-        if (testloader == None):
+    def inference(self, model, testset=None):
+        if (testset == None):
             testloader = self.testloader
+        else:
+            testloader = DataLoader(testset, batch_size=int(len(testset)/10), shuffle=False)
         
         model.eval()
         batch_loss, total, correct = [], 0.0, 0.0
@@ -55,7 +61,8 @@ class LocalUpdate(object):
             X, y = X.to(self.device), y.to(self.device)
 
             pred = model(X)
-            batch_loss += [self.loss(pred, y).item()]
+            loss = self.loss(pred, y)
+            batch_loss += [copy.deepcopy(loss.item())]
 
             _, pred_labels = torch.max(pred, 1)
             pred_labels = pred_labels.view(-1)
@@ -63,3 +70,14 @@ class LocalUpdate(object):
             total += len(y)
         
         return correct / total, sum(batch_loss) / len(batch_loss)
+    
+def average_weights(w):
+    """
+    Returns the average of the weights.
+    """
+    w_avg = copy.deepcopy(w[0])
+    for key in w_avg.keys():
+        for i in range(1, len(w)):
+            w_avg[key] += w[i][key]
+        w_avg[key] = torch.div(w_avg[key], len(w))
+    return w_avg

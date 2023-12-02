@@ -118,22 +118,18 @@ def create_client_config(config_path, num_users, dataset, type):
     with open(config_path, 'w') as file:
         json.dump(dict_users_lsts, file)
 
-def load_client_config(config_path, dataset, client_id, bs, train_ratio=0.8, val_ratio=0.1):
-    clients_dict = json.load(config_path)
+def load_client_config(clients_dict, dataset, client_id, bs, train_ratio=0.8):
     indices = clients_dict[client_id]
 
     idxs_train = indices[:int(train_ratio*len(indices))]
-    idxs_val = indices[int(train_ratio*len(indices)):int((train_ratio + val_ratio)*len(indices))]
-    idxs_test = indices[int((train_ratio + val_ratio)*len(indices)):]
+    idxs_test = indices[int(train_ratio*len(indices)):]
 
     trainloader = DataLoader(DatasetSplit(dataset, idxs_train),
                                 batch_size=bs, shuffle=True)
-    validloader = DataLoader(DatasetSplit(dataset, idxs_val),
-                                batch_size=int(len(idxs_val)/10), shuffle=False)
     testloader = DataLoader(DatasetSplit(dataset, idxs_test),
                             batch_size=int(len(idxs_test)/10), shuffle=False)
 
-    return trainloader, validloader, testloader
+    return trainloader, testloader
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
