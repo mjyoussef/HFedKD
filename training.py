@@ -6,15 +6,23 @@ import argparse
 from utils import LocalUpdate, average_weights, inference
 from data_loader import load_client_config
 from torch.nn import functional as F
+from models.vgg import *
+from models.char_cnn import *
+from torchvision import datasets
+from torchvision.transforms import ToTensor
 
 def parse_data_config(path):
-    clients_dict_lsts = json.load(path)
+    with open(path) as f:
+        clients_dict_lsts = json.load(f)
+
     clients_dict = {}
     for key in clients_dict_lsts:
         clients_dict[key] = np.array(clients_dict_lsts[key])
+    
+    return clients_dict
 
-clients_dict_cifar = parse_data_config('/data/cifar_config.json')
-clients_dict_ag = parse_data_config('/data/ag_news_config.json')
+clients_dict_cifar = parse_data_config('data/cifar_config.json')
+clients_dict_ag = parse_data_config('data/ag_news_config.json')
 
 num_clients = 40
 
@@ -30,20 +38,24 @@ def train_isolated(args, groups, group_size, user_models, trainset, valset, data
 
     for client in range(num_clients):
         user_args = args.copy()
+        user_args['client_id'] = client
         if (dataset_name == 'CIFAR10'):
             user_args['clients_dict'] = clients_dict_cifar
-        else:
+        elif (dataset_name == 'AG_NEWS'):
             user_args['clients_dict'] = clients_dict_ag
-        
-        user_args['client_id'] = client
-
+        else:
+            raise Exception('Invalid dataset name')
+    
         updater = LocalUpdate(user_args, trainset)
         model = user_models[client]
         _, l = updater.update_weights(model)
-        loss[groups[client]] += l
 
-        acc_client, l_client = updater.inference(model, valset=valset)
-        acc[groups[client]] += acc_client
+        new_loss = loss.get(groups[client], 0) + l
+        loss[groups[client]] = new_loss
+
+        acc_client, l_client = updater.inference(model, testset=valset)
+        new_acc = acc.get(groups[client], 0) + acc_client
+        acc[groups[client]] = new_acc
     
     for key in loss:
         loss[key] /= group_size
@@ -55,6 +67,9 @@ def train_clustered(args, groups, group_size, user_models, trainset, valset, dat
     loss = {}
     acc = {}
     weights_map = {}
+    for group in groups:
+        loss[group] = 0
+        acc[group] = 0
 
     for client in range(num_clients):
         user_args = args.copy()
@@ -108,6 +123,10 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
     
     loss = {}
     acc = {}
+    for group in groups:
+        loss[group] = 0
+        acc[group] = 0
+
     for client in range(num_clients):
         model = user_models[client]
 
@@ -152,7 +171,7 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
                 print(f"Client: {client} / Epoch: {epoch} / Loss: {epoch_loss[-1]}")
 
         task_loss_fn = F.nll_loss()
-        acc_client, l_client = inference(model, args.device, task_loss_fn, testloader)
+        acc_client, l_client = inference(model, args.device, task_loss_fn, valset)
         loss[groups[client]] += epoch_loss[-1]
         acc[groups[client]] += acc_client
 
@@ -161,7 +180,54 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
         acc[group] /= group_size
 
 
+# quick tests
+def main_CIFAR10():
+    args = {
+        'gpu': False,
+        'optimizer': 'adam',
+        'lr': 0.001,
+        'local_bs': 32,
+        'local_ep': 1,
+        'logging': True,
+        'train_ratio': 0.8
+    }
+
+    groups = {}
+    user_models = {}
+    for i in range(num_clients):
+        if (i < 10):
+            groups[i] = 0
+            user_models[i] = vgg11()
+        elif (i < 20):
+            groups[i] = 1
+            user_models[i] = vgg13()
+        elif (i < 30):
+            groups[i] = 2
+            user_models[i] = vgg16()
+        else:
+            groups[i] = 3
+            user_models[i] = vgg19()
+
+    for i in range(10):
+        #args, groups, group_size, user_models, trainset, valset, dataset_name):
+        trainset = datasets.CIFAR10(
+            root="data",
+            train=True,
+            download=True,
+            transform=ToTensor(),
+        )
+
+        valset = datasets.CIFAR10(
+            root="data",
+            train=False,
+            download=True,
+            transform=ToTensor(),
+        )
+        train_isolated(args, groups, 10, user_models, trainset, valset, dataset_name='CIFAR10')
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, required=True)
-    parser.add_argument('--method', type=str, required=True)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--dataset', type=str, required=True)
+    # parser.add_argument('--method', type=str, required=True)
+    main_CIFAR10()

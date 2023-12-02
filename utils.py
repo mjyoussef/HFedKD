@@ -10,25 +10,25 @@ class LocalUpdate(object):
         # args: {gpu: boolean, optimizer: string, lr: float, local_bs: int, local_ep: int, logging: boolean, 
         # client_id: int, clients_dict: np.array, train_ratio: float}
         self.args = args
-        self.client_id = self.args.client_id
+        self.client_id = self.args['client_id']
         self.trainloader, self.testloader = \
-        load_client_config(self.args.clients_dict, dataset, self.args.client_id, self.args.bs, 
-                           train_ratio=self.args.train_ratio)
-        self.device = 'cuda' if args.gpu else 'cpu'
+        load_client_config(self.args['clients_dict'], dataset, self.args['client_id'], self.args['local_bs'], 
+                           train_ratio=self.args['train_ratio'])
+        self.device = 'cuda' if self.args['gpu'] else 'cpu'
         self.loss = nn.NLLLoss().to(self.device)
     
     def update_weights(self, model):
         model.train(True)
 
-        if self.args.optimizer == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args.lr,
+        if self.args['optimizer'] == 'sgd':
+            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'],
                                         momentum=0.5)
-        if self.args.optimizer == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.args.lr,
+        if self.args['optimizer']  == 'adam':
+            optimizer = torch.optim.Adam(model.parameters(), lr=self.args['lr'],
                                          weight_decay=1e-4)
             
         epoch_loss = []
-        for epoch in range(self.args.local_ep):
+        for epoch in range(self.args['local_ep']):
             batch_loss = []
             for batch, (X, y) in enumerate(self.trainloader):
                 X, y = X.to(self.device), y.to(self.device)
@@ -43,7 +43,7 @@ class LocalUpdate(object):
                 batch_loss += [copy.deepcopy(loss.item())]
             
             epoch_loss += [sum(batch_loss) / len(batch_loss)]
-            if (self.args.logging):
+            if (self.args['logging']):
                 print(f"Client: {self.client_id} / Epoch: {epoch} / Loss: {epoch_loss[-1]}")
         
         return model.state_dict(), epoch_loss[-1]
@@ -53,11 +53,11 @@ class LocalUpdate(object):
             testloader = self.testloader
         else:
             testloader = DataLoader(testset, batch_size=int(len(testset)/10), shuffle=False)
-        
+
         return inference(model, self.device, self.loss, testloader)
 
 def inference(model, device, loss, testloader):
-    model.eval(True)
+    model.eval()
     batch_loss, total, correct = [], 0.0, 0.0
 
     with torch.no_grad():
@@ -65,8 +65,8 @@ def inference(model, device, loss, testloader):
             X, y = X.to(device), y.to(device)
 
             pred = model(X)
-            loss = loss(pred, y)
-            batch_loss += [copy.deepcopy(loss.item())]
+            l = loss(pred, y)
+            batch_loss += [copy.deepcopy(l.item())]
 
             _, pred_labels = torch.max(pred, 1)
             pred_labels = pred_labels.view(-1)

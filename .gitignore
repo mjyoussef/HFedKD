@@ -3,3 +3,5 @@
 /data/ag_news_config.json
 /data/cifar-10-python.tar.gz
 /data/cifar-10-batches-py
+__pycache__/
+*.py[cod]

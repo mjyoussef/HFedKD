@@ -23,6 +23,7 @@ class VGG(nn.Module):
             nn.ReLU(True),
             nn.Linear(4096, 10),
         )
+        self.log_softmax = nn.LogSoftmax()
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -35,6 +36,7 @@ class VGG(nn.Module):
         x = self.features(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)
+        x = self.log_softmax(x)
         return x
 
 
@@ -62,7 +64,6 @@ cfg = {
           512, 512, 512, 512, 'M'],
     'T': [32, 'M', 64, 'M', 64, 64, 'M', 128, 128, 'M', 128, 128, 'M']
 }
-
 
 def vgg11():
     """VGG 11-layer model (configuration "A")"""
@@ -103,6 +104,6 @@ def vgg19_bn():
     """VGG 19-layer model (configuration 'E') with batch normalization"""
     return VGG(make_layers(cfg['E'], batch_norm=True))
 
-def vggTeacher():
+def vggStudent():
     """Teacher model based on VGG-11 without batch normalization"""
     return VGG(make_layers(cfg['T']))

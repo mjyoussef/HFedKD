@@ -36,7 +36,6 @@ class AGNEWS(Dataset):
         self.loadAlphabet(alphabet_path)
         self.load(label_data_path)
         
-            
     def __len__(self):
         return len(self.label)
 
@@ -119,7 +118,7 @@ def create_client_config(config_path, num_users, dataset, type):
         json.dump(dict_users_lsts, file)
 
 def load_client_config(clients_dict, dataset, client_id, bs, train_ratio=0.8):
-    indices = clients_dict[client_id]
+    indices = clients_dict[str(client_id)]
 
     idxs_train = indices[:int(train_ratio*len(indices))]
     idxs_test = indices[int(train_ratio*len(indices)):]
