@@ -11,11 +11,10 @@ class LocalUpdate(object):
         # client_id: int, clients_dict: np.array, train_ratio: float}
         self.args = args
         self.client_id = self.args['client_id']
-        self.trainloader, self.testloader = \
-        load_client_config(self.args['clients_dict'], dataset, self.args['client_id'], self.args['local_bs'], 
-                           train_ratio=self.args['train_ratio'])
+        self.trainloader = load_client_config(self.args['clients_dict'], dataset, 
+                                              self.args['client_id'], self.args['local_bs'])
         self.device = 'cuda' if self.args['gpu'] else 'cpu'
-        self.loss = nn.NLLLoss().to(self.device)
+        self.loss = nn.CrossEntropyLoss().to(self.device)
     
     def update_weights(self, model):
         model.train(True)
@@ -48,7 +47,7 @@ class LocalUpdate(object):
         
         return model.state_dict(), epoch_loss[-1]
             
-    def inference(self, model, testset=None):
+    def inference(self, model, testset):
         if (testset == None):
             testloader = self.testloader
         else:

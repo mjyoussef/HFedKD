@@ -4,7 +4,7 @@ import torch.nn as nn
 
 __all__ = [
     'VGG', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn',
-    'vgg19_bn', 'vgg19',
+    'vgg19_bn', 'vgg19', 'vggStudent'
 ]
 
 class VGG(nn.Module):
@@ -23,7 +23,7 @@ class VGG(nn.Module):
             nn.ReLU(True),
             nn.Linear(4096, 10),
         )
-        self.log_softmax = nn.LogSoftmax()
+        self.log_softmax = nn.Softmax()
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
