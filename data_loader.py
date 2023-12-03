@@ -47,6 +47,7 @@ class AGNEWS(Dataset):
     def loadAlphabet(self, alphabet_path):
         with open(alphabet_path) as f:
             self.alphabet = ''.join(json.load(f))
+            self.alphabet_size = len(self.alphabet)
 
     def load(self, label_data_path, lowercase = True):
         self.label = []

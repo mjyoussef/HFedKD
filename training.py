@@ -5,7 +5,7 @@ import numpy as np
 import argparse
 import os
 from utils import LocalUpdate, average_weights, inference
-from data_loader import load_client_config
+from data_loader import load_client_config, AGNEWS
 from torch.nn import functional as F
 from torch.utils.data import random_split
 from models.vgg import *
@@ -264,6 +264,62 @@ def main_CIFAR10(epochs, method):
             # train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
             train_fedhat(args, groups, os.environ['num_clients'] / 4, user_models, student_model,
                          trainset, val_set, 'CIFAR10') 
+        else:
+            raise Exception('Invalid method provided')
+    
+    # testing
+    print("Evaluation: ")
+    acc = {}
+    loss = {}
+    if (args['gpu'] == 'cuda'):
+        device = 'cuda'
+    else:
+        device = 'cpu'
+    for client in range(os.environ['num_clients']):
+        a, l = inference(user_models[client], device, F.cross_entropy, 
+                         DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
+        acc[groups[client]] = acc.get(groups[client], 0) + a
+        loss[groups[client]] = loss.get(groups[client], 0) + l
+    
+    print(f"Accuracy: {acc}")
+    print(f"Loss: {loss}")
+
+
+def main_CIFAR10(epochs, method):
+    args = {
+        'gpu': False,
+        'optimizer': 'adam',
+        'lr': 0.001,
+        'local_bs': 32,
+        'local_ep': 5,
+        'logging': True
+    }
+
+    train_path = 'data/ag_train.csv'
+    test_path = 'data/ag_test.csv'
+    alphabet_path = 'data/alphabet.json'
+    trainset = AGNEWS(train_path, alphabet_path)
+    test_and_val_set = AGNEWS(test_path, alphabet_path)
+    in_channels = trainset.alphabet_size
+
+    groups, user_models = create_groups_char_cnn(in_channels)
+
+    gen = torch.Generator().manual_seed(100)
+    val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
+
+    for i in range(epochs):
+        if (method == 'isolated'):
+            train_isolated(args, groups, os.environ['num_clients'] / 4, user_models, 
+                           trainset, val_set, 'AG_NEWS')
+        elif (method == 'clustered'):
+            # train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
+            train_clustered(args, groups, os.environ['num_clients'] / 4, user_models,
+                            trainset, val_set, 'AG_NEWS')
+        elif (method == 'fedhat'):
+            student_model = CharCNN(in_channels, 128, dropout=0.1)
+            # train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
+            train_fedhat(args, groups, os.environ['num_clients'] / 4, user_models, student_model,
+                         trainset, val_set, 'AG_NEWS') 
         else:
             raise Exception('Invalid method provided')
     
