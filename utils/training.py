@@ -31,9 +31,9 @@ class LocalUpdate(object):
                 pred = model(X)
                 loss = self.loss(pred, y)
 
+                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                optimizer.zero_grad()
 
                 batch_loss += [loss.item()]
             

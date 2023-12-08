@@ -9,7 +9,7 @@ from torch.utils.data import random_split
 from models.vgg import *
 from models.char_cnn import *
 from torchvision import datasets
-from torchvision.transforms import ToTensor
+from torchvision.transforms import transforms, ToTensor
 from torch.utils.data import DataLoader
 
 ############################ TRAINING SUBROUTINES ############################
@@ -158,13 +158,13 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
                 output_t = task_loss_t + distill_loss_t
                 output_s = task_loss_s + distill_loss_s
 
+                teacher_optimizer.zero_grad()
                 output_t.backward()
                 teacher_optimizer.step()
-                teacher_optimizer.zero_grad()
 
+                student_optimizer.zero_grad()
                 output_s.backward()
                 student_optimizer.step()
-                student_optimizer.zero_grad()
 
                 batch_loss += [output_t.item()]
             
@@ -240,24 +240,28 @@ def main_CIFAR10(args):
     # assign models to clients
     groups, user_models = create_groups_vgg(args['num_clients'])
 
+    transform = transforms.Compose(
+        [transforms.ToTensor(), 
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
     trainset = datasets.CIFAR10(
         root="data",
         train=True,
         download=True,
-        transform=ToTensor(),
+        transform=transform,
     )
 
     test_and_val_set = datasets.CIFAR10(
         root="data",
         train=False,
         download=True,
-        transform=ToTensor(),
+        transform=transform,
     )
 
-    gen = torch.Generator().manual_seed(os.environ['seed'])
+    gen = torch.Generator().manual_seed(int(os.environ['seed']))
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
-    group_size = args['num_clients'] // os.environ['num_vgg_models']
+    group_size = args['num_clients'] // int(os.environ['num_vgg_models'])
     for i in range(args['epochs']):
         if (args['method'] == 'isolated'):
             train_isolated(args, groups, group_size, user_models, 
@@ -302,10 +306,10 @@ def main_AG_NEWS(args):
     # assign models to clients
     groups, user_models = create_groups_char_cnn(args['num_clients'], in_channels)
 
-    gen = torch.Generator().manual_seed(os.environ['seed'])
+    gen = torch.Generator().manual_seed(int(os.environ['seed']))
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
-    group_size = args['num_clients'] // os.environ['num_charcnn_models']
+    group_size = args['num_clients'] // int(os.environ['num_charcnn_models'])
     for i in range(args['epochs']):
         if (args['method'] == 'isolated'):
             train_isolated(args, groups, group_size, user_models, 
@@ -345,14 +349,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # hardcoded variables
-    os.environ['seed'] = 100
-    os.environ['num_vgg_models'] = 4
-    os.environ['num_charcnn_models'] = 3
+    os.environ['seed'] = "100"
+    os.environ['num_vgg_models'] = "4"
+    os.environ['num_charcnn_models'] = "3"
 
-    # `num_clients` is evenly distributed among model groups
-    parser.add_argument('--num_clients', type=int, required=True)
+    # `num_clients` should generally NOT be changed
+    parser.add_argument('--num_clients', type=int, default=40)
 
-    parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10, AG_NEWS'])
+    parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10', 'AG_NEWS'])
     parser.add_argument('--method', type=str, required=True, choices=['isolated', 'clustered', 'fedhat'])
     parser.add_argument('--gpu', type=bool, default=False)
     parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'])
@@ -363,14 +367,12 @@ if __name__ == '__main__':
     parser.add_argument('--logging', type=bool, default=False)
     
     args = parser.parse_args()
-    if (args.dataset == 'CIFAR10' and args.num_clients % os.environ['num_vgg_models'] != 0):
-        raise Exception('Number of clients is invalid')
-    
-    if (args.dataset == 'AG_NEWS' and args.num_clients % os.environ['num_charcnn_models'] != 0):
-        raise Exception('Number of clients is invalid')
 
     clients_dict_cifar = parse_data_config('data/cifar_config.json')
     clients_dict_ag = parse_data_config('data/ag_news_config.json')
+
+    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2
+    # python3 main.py --num_clients 40 --dataset AG_NEWS --method isolated --logging True --local_ep 2
 
     if (args.dataset == 'CIFAR10'):
         main_CIFAR10(vars(args))

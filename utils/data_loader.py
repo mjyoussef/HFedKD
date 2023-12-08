@@ -55,7 +55,7 @@ class AGNEWS(Dataset):
         with open(label_data_path, 'r') as f:
             rdr = csv.reader(f, delimiter=',', quotechar='"')
             for _, row in enumerate(rdr):
-                self.label.append(int(row[0]))
+                self.label.append(int(row[0]) - 1)
                 txt = ' '.join(row[1:])
                 if lowercase:
                     txt = txt.lower()                
