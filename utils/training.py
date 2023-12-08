@@ -2,13 +2,11 @@ import copy
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from data_loader import load_client_config
+from utils.data_loader import load_client_config
 import copy
 
 class LocalUpdate(object):
     def __init__(self, args, dataset):
-        # args: {gpu: boolean, optimizer: string, lr: float, local_bs: int, local_ep: int, logging: boolean, 
-        # client_id: int, clients_dict: np.array, train_ratio: float}
         self.args = args
         self.client_id = self.args['client_id']
         self.trainloader = load_client_config(self.args['clients_dict'], dataset, 
@@ -20,11 +18,9 @@ class LocalUpdate(object):
         model.train(True)
 
         if self.args['optimizer'] == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'],
-                                        momentum=0.5)
+            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'], momentum=0.5)
         if self.args['optimizer']  == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.args['lr'],
-                                         weight_decay=1e-4)
+            optimizer = torch.optim.Adam(model.parameters(), lr=self.args['lr'], weight_decay=1e-4)
             
         epoch_loss = []
         for epoch in range(self.args['local_ep']):
@@ -39,7 +35,7 @@ class LocalUpdate(object):
                 optimizer.step()
                 optimizer.zero_grad()
 
-                batch_loss += [copy.deepcopy(loss.item())]
+                batch_loss += [loss.item()]
             
             epoch_loss += [sum(batch_loss) / len(batch_loss)]
             if (self.args['logging']):
@@ -48,11 +44,7 @@ class LocalUpdate(object):
         return model.state_dict(), epoch_loss[-1]
             
     def inference(self, model, testset):
-        if (testset == None):
-            testloader = self.testloader
-        else:
-            testloader = DataLoader(testset, batch_size=int(len(testset)/10), shuffle=False)
-
+        testloader = DataLoader(testset, batch_size=int(len(testset)/10), shuffle=False)
         return inference(model, self.device, self.loss, testloader)
 
 def inference(model, device, loss, testloader):
@@ -65,7 +57,7 @@ def inference(model, device, loss, testloader):
 
             pred = model(X)
             l = loss(pred, y)
-            batch_loss += [copy.deepcopy(l.item())]
+            batch_loss += [l.item()]
 
             _, pred_labels = torch.max(pred, 1)
             pred_labels = pred_labels.view(-1)

@@ -118,6 +118,16 @@ def create_client_config(config_path, num_users, dataset, type):
     with open(config_path, 'w') as file:
         json.dump(dict_users_lsts, file)
 
+def parse_data_config(path):
+    with open(path) as f:
+        clients_dict_lsts = json.load(f)
+
+    clients_dict = {}
+    for key in clients_dict_lsts:
+        clients_dict[key] = np.array(clients_dict_lsts[key])
+    
+    return clients_dict
+
 def load_client_config(clients_dict, dataset, client_id, bs):
     indices = clients_dict[str(client_id)]
     trainloader = DataLoader(DatasetSplit(dataset, indices), batch_size=bs, shuffle=True)

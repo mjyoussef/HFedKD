@@ -1,11 +1,9 @@
-import json
 import torch
 import copy
-import numpy as np
 import argparse
 import os
-from utils import LocalUpdate, average_weights, inference
-from data_loader import load_client_config, AGNEWS
+from utils.training import LocalUpdate, average_weights, inference
+from utils.data_loader import load_client_config, AGNEWS, parse_data_config
 from torch.nn import functional as F
 from torch.utils.data import random_split
 from models.vgg import *
@@ -14,27 +12,15 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader
 
-def parse_data_config(path):
-    with open(path) as f:
-        clients_dict_lsts = json.load(f)
-
-    clients_dict = {}
-    for key in clients_dict_lsts:
-        clients_dict[key] = np.array(clients_dict_lsts[key])
-    
-    return clients_dict
-
-# global references
-clients_dict_cifar = parse_data_config('data/cifar_config.json')
-clients_dict_ag = parse_data_config('data/ag_news_config.json')
-os.environ['num_clients'] = 40
+############################ TRAINING SUBROUTINES ############################
 
 def train_isolated(args, groups, group_size, user_models, trainset, valset, dataset_name):
     '''Isolated training subroutine (per epoch)'''
-    loss = {}
+    t_loss = {}
+    v_loss = {}
     acc = {}
 
-    for client in range(os.environ['num_clients']):
+    for client in range(args['num_clients']):
         user_args = args.copy()
         user_args['client_id'] = client
         if (dataset_name == 'CIFAR10'):
@@ -46,29 +32,35 @@ def train_isolated(args, groups, group_size, user_models, trainset, valset, data
     
         updater = LocalUpdate(user_args, trainset)
         model = user_models[client]
-        _, l = updater.update_weights(model)
+        model_params, t_l = updater.update_weights(model)
+        acc_client, v_l = updater.inference(model, valset)
 
-        new_loss = loss.get(groups[client], 0) + l
-        loss[groups[client]] = new_loss
+        # training loss
+        t_loss[groups[client]] = t_loss.get(groups[client], 0) + t_l
 
-        acc_client, l_client = updater.inference(model, valset)
-        new_acc = acc.get(groups[client], 0) + acc_client
-        acc[groups[client]] = new_acc
+        # validation loss
+        v_loss[groups[client]] = v_loss.get(groups[client], 0) + v_l
+
+        # accuracy
+        acc[groups[client]] = acc.get(groups[client], 0) + acc_client
     
-    for key in loss:
-        loss[key] /= group_size
+    # average losses and accuracies for each group
+    for key in t_loss:
+        t_loss[key] /= group_size
+        v_loss[key] /= group_size
         acc[key] /= group_size
     
-    return loss, acc
+    return t_loss, v_loss, acc
 
 def train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
     '''Clustered federated learning subroutine (per epoch)'''
-    loss = {}
+    t_loss = {}
+    v_loss = {}
     acc = {}
     weights_map = {}
 
     # train individual clients
-    for client in range(os.environ['num_clients']):
+    for client in range(args['num_clients']):
         user_args = args.copy()
         user_args['client_id'] = client
         if (dataset_name == 'CIFAR10'):
@@ -80,18 +72,25 @@ def train_clustered(args, groups, group_size, user_models, trainset, valset, dat
 
         updater = LocalUpdate(user_args, trainset)
         model = user_models[client]
-        w, l = updater.update_weights(model)
-        loss[groups[client]] = loss.get(groups[client], 0) + l
+        w, t_l = updater.update_weights(model)
+        acc_client, v_l = updater.inference(model, valset)
 
-        acc_client, l_client = updater.inference(model, valset=valset)
+        # training loss
+        t_loss[groups[client]] = t_loss.get(groups[client], 0) + t_l
+
+        # validation loss
+        v_loss[groups[client]] = v_loss.get(groups[client], 0) + v_l
+
+        # accuracy
         acc[groups[client]] = acc.get(groups[client], 0) + acc_client
 
+        # weights map
         lsts = weights_map.get(groups[client], [[], []])
         client_lst = lsts[0] + [client]
         w_lst = lsts[1] + [copy.deepcopy(w)]
         weights_map[groups[client]] = [client_lst, w_lst]
     
-    # aggregate weights for each cluster
+    # aggregate weights for each group
     for group in weights_map:
         client_lst = weights_map[group][0]
         w_lst = weights_map[group][1]
@@ -101,11 +100,13 @@ def train_clustered(args, groups, group_size, user_models, trainset, valset, dat
             client_model = user_models[client]
             client_model.load_state_dict(copy.deepcopy(group_model))
 
-    for key in loss:
-        loss[key] /= group_size
+    # average losses and accuracies for each group
+    for key in t_loss:
+        t_loss[key] /= group_size
+        v_loss[key] /= group_size
         acc[key] /= group_size
     
-    return loss, acc
+    return t_loss, v_loss, acc
 
 def train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
     '''FedHAT training subroutine (per epoch)'''
@@ -123,25 +124,27 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
     if (args['optimizer'] == 'adam'):
         student_optimizer = torch.optim.Adam(student_model.parameters(), lr=args.lr, weight_decay=1e-4)
     
-    loss = {}
+    device = 'cuda' if args['gpu'] else 'cpu'
+    
+    t_loss = {}
+    v_loss = {}
     acc = {}
 
-    for client in range(os.environ['num_clients']):
+    for client in range(args['num_clients']):
         model = user_models[client]
+        trainloader = load_client_config(clients_dict, trainset, client, args['local_bs'])
 
-        trainloader = load_client_config(clients_dict, trainset, client, args.local_bs)
+        if (args['optimizer'] == 'sgd'):
+            teacher_optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=0.5)
 
-        if (args.optimizer == 'sgd'):
-            teacher_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.5)
-
-        if (args.optimizer == 'adam'):
-            teacher_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+        if (args['optimizer'] == 'adam'):
+            teacher_optimizer = torch.optim.Adam(model.parameters(), lr=args['lr'], weight_decay=1e-4)
 
         epoch_loss = []
-        for epoch in range(args.local_ep):
+        for epoch in range(args['local_ep']):
             batch_loss = []
             for batch, (X, y) in enumerate(trainloader):
-                X, y = X.to(args.device), y.to(args.device)
+                X, y = X.to(device), y.to(device)
 
                 pred_s = student_model(X)
                 pred_t = model(X)
@@ -163,32 +166,39 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
                 student_optimizer.step()
                 student_optimizer.zero_grad()
 
-                batch_loss += [copy.deepcopy(output_t.item())]
+                batch_loss += [output_t.item()]
             
             epoch_loss += [sum(batch_loss) / len(batch_loss)]
             if (args['logging']):
                 print(f"Client: {client} / Epoch: {epoch} / Loss: {epoch_loss[-1]}")
-
+        
+        # inference
         task_loss_fn = F.cross_entropy
-        if (args['gpu'] == 'cuda'):
-            device = 'cuda'
-        else:
-            device = 'cpu'
-        acc_client, l_client = inference(model, device, task_loss_fn, valset)
-        loss[groups[client]] = loss.get(groups[client], 0) + epoch_loss[-1]
+        acc_client, v_l = inference(model, device, task_loss_fn, valset)
+
+        # training loss
+        t_loss[groups[client]] = t_loss.get(groups[client], 0) + epoch_loss[-1]
+
+        # validation loss
+        v_loss[groups[client]] = v_loss.get(groups[client], 0) + v_l
+
+        # accuracy
         acc[groups[client]] = acc.get(groups[client], 0) + acc_client
 
-    for group in loss:
-        loss[group] /= group_size
+    # average losses and accuracies for each group
+    for group in t_loss:
+        t_loss[group] /= group_size
+        v_loss[group] /= group_size
         acc[group] /= group_size
+    
+    return t_loss, v_loss, acc
 
-def create_groups_vgg():
+def create_groups_vgg(num_clients):
     groups = {}
     user_models = {}
 
-    num_clients = os.environ['num_clients']
     clients_per_model = num_clients / 4
-    for i in range(os.environ['num_clients']):
+    for i in range(num_clients):
         if (i < 1 * (clients_per_model)):
             groups[i] = 0
             user_models[i] = vgg11()
@@ -204,13 +214,12 @@ def create_groups_vgg():
     
     return groups, user_models
 
-def create_groups_char_cnn(in_channels):
+def create_groups_char_cnn(num_clients, in_channels):
     groups = {}
     user_models = {}
 
-    num_clients = os.environ['num_clients']
     clients_per_model = num_clients / 3
-    for i in range(os.environ['num_clients']):
+    for i in range(num_clients):
         if (i < 1 * (clients_per_model)):
             groups[i] = 0
             user_models[i] = CharCNN(in_channels, 256, dropout=0.2)
@@ -223,17 +232,14 @@ def create_groups_char_cnn(in_channels):
     
     return groups, user_models
 
-def main_CIFAR10(epochs, method):
-    args = {
-        'gpu': False,
-        'optimizer': 'adam',
-        'lr': 0.001,
-        'local_bs': 32,
-        'local_ep': 5,
-        'logging': True
-    }
 
-    groups, user_models = create_groups_vgg()
+############################ TRAINING LOOPS ############################
+
+def main_CIFAR10(args):
+
+    # assign models to clients
+    groups, user_models = create_groups_vgg(args['num_clients'])
+
     trainset = datasets.CIFAR10(
         root="data",
         train=True,
@@ -248,53 +254,44 @@ def main_CIFAR10(epochs, method):
         transform=ToTensor(),
     )
 
-    gen = torch.Generator().manual_seed(100)
+    gen = torch.Generator().manual_seed(os.environ['seed'])
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
-    for i in range(epochs):
-        if (method == 'isolated'):
-            train_isolated(args, groups, os.environ['num_clients'] / 4, user_models, 
+    group_size = args['num_clients'] // os.environ['num_vgg_models']
+    for i in range(args['epochs']):
+        if (args['method'] == 'isolated'):
+            train_isolated(args, groups, group_size, user_models, 
                            trainset, val_set, 'CIFAR10')
-        elif (method == 'clustered'):
-            # train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
-            train_clustered(args, groups, os.environ['num_clients'] / 4, user_models,
+        elif (args['method'] == 'clustered'):
+            train_clustered(args, groups, group_size, user_models,
                             trainset, val_set, 'CIFAR10')
-        elif (method == 'fedhat'):
+        elif (args['method'] == 'fedhat'):
             student_model = vggStudent()
-            # train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
-            train_fedhat(args, groups, os.environ['num_clients'] / 4, user_models, student_model,
+            train_fedhat(args, groups, group_size, user_models, student_model,
                          trainset, val_set, 'CIFAR10') 
         else:
             raise Exception('Invalid method provided')
     
-    # testing
+    # evaluation
     print("Evaluation: ")
     acc = {}
     loss = {}
-    if (args['gpu'] == 'cuda'):
-        device = 'cuda'
-    else:
-        device = 'cpu'
-    for client in range(os.environ['num_clients']):
+    device = 'cuda' if args['gpu'] else 'cpu'
+    for client in range(args['num_clients']):
         a, l = inference(user_models[client], device, F.cross_entropy, 
                          DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
         acc[groups[client]] = acc.get(groups[client], 0) + a
         loss[groups[client]] = loss.get(groups[client], 0) + l
+
+    # average accuracies and losses for groups
+    for group in loss:
+        loss[group] /= group_size
+        acc[group] /= group_size
     
     print(f"Accuracy: {acc}")
     print(f"Loss: {loss}")
 
-
-def main_CIFAR10(epochs, method):
-    args = {
-        'gpu': False,
-        'optimizer': 'adam',
-        'lr': 0.001,
-        'local_bs': 32,
-        'local_ep': 5,
-        'logging': True
-    }
-
+def main_AG_NEWS(args):
     train_path = 'data/ag_train.csv'
     test_path = 'data/ag_test.csv'
     alphabet_path = 'data/alphabet.json'
@@ -302,56 +299,81 @@ def main_CIFAR10(epochs, method):
     test_and_val_set = AGNEWS(test_path, alphabet_path)
     in_channels = trainset.alphabet_size
 
-    groups, user_models = create_groups_char_cnn(in_channels)
+    # assign models to clients
+    groups, user_models = create_groups_char_cnn(args['num_clients'], in_channels)
 
-    gen = torch.Generator().manual_seed(100)
+    gen = torch.Generator().manual_seed(os.environ['seed'])
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
-    for i in range(epochs):
-        if (method == 'isolated'):
-            train_isolated(args, groups, os.environ['num_clients'] / 4, user_models, 
+    group_size = args['num_clients'] // os.environ['num_charcnn_models']
+    for i in range(args['epochs']):
+        if (args['method'] == 'isolated'):
+            train_isolated(args, groups, group_size, user_models, 
                            trainset, val_set, 'AG_NEWS')
-        elif (method == 'clustered'):
+        elif (args['method'] == 'clustered'):
             # train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
-            train_clustered(args, groups, os.environ['num_clients'] / 4, user_models,
+            train_clustered(args, groups, group_size, user_models,
                             trainset, val_set, 'AG_NEWS')
-        elif (method == 'fedhat'):
+        elif (args['method'] == 'fedhat'):
             student_model = CharCNN(in_channels, 128, dropout=0.1)
             # train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
-            train_fedhat(args, groups, os.environ['num_clients'] / 4, user_models, student_model,
-                         trainset, val_set, 'AG_NEWS') 
+            train_fedhat(args, groups, group_size, user_models, student_model,
+                         trainset, val_set, 'AG_NEWS')
         else:
             raise Exception('Invalid method provided')
     
-    # testing
+    # evaluation
     print("Evaluation: ")
     acc = {}
     loss = {}
-    if (args['gpu'] == 'cuda'):
-        device = 'cuda'
-    else:
-        device = 'cpu'
-    for client in range(os.environ['num_clients']):
+    device = 'cuda' if args['gpu'] else 'cpu'
+    for client in range(args['num_clients']):
         a, l = inference(user_models[client], device, F.cross_entropy, 
                          DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
         acc[groups[client]] = acc.get(groups[client], 0) + a
         loss[groups[client]] = loss.get(groups[client], 0) + l
     
+    # average accuracies and losses among groups
+    for group in loss:
+        loss[group] /= group_size
+        acc[group] /= group_size
+    
     print(f"Accuracy: {acc}")
     print(f"Loss: {loss}")
 
-def main_AG_NEWS():
-    pass
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, required=True)
-    parser.add_argument('--method', type=str, required=True)
 
+    # hardcoded variables
+    os.environ['seed'] = 100
+    os.environ['num_vgg_models'] = 4
+    os.environ['num_charcnn_models'] = 3
+
+    # `num_clients` is evenly distributed among model groups
+    parser.add_argument('--num_clients', type=int, required=True)
+
+    parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10, AG_NEWS'])
+    parser.add_argument('--method', type=str, required=True, choices=['isolated', 'clustered', 'fedhat'])
+    parser.add_argument('--gpu', type=bool, default=False)
+    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'])
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--local_bs', type=int, default=32)
+    parser.add_argument('--local_ep', type=int, default=7)
+    parser.add_argument('--logging', type=bool, default=False)
+    
     args = parser.parse_args()
+    if (args.dataset == 'CIFAR10' and args.num_clients % os.environ['num_vgg_models'] != 0):
+        raise Exception('Number of clients is invalid')
+    
+    if (args.dataset == 'AG_NEWS' and args.num_clients % os.environ['num_charcnn_models'] != 0):
+        raise Exception('Number of clients is invalid')
+
+    clients_dict_cifar = parse_data_config('data/cifar_config.json')
+    clients_dict_ag = parse_data_config('data/ag_news_config.json')
+
     if (args.dataset == 'CIFAR10'):
-        main_CIFAR10(40, args.method)
-    elif (args.dataset == 'AG_NEWS'):
-        main_AG_NEWS(40, args.method)
-    else:
-        raise Exception('Invalid dataset')
+        main_CIFAR10(vars(args))
+    
+    if (args.dataset == 'AG_NEWS'):
+        main_AG_NEWS(vars(args))
