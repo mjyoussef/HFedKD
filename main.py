@@ -116,15 +116,16 @@ def train_fedhat(args, groups, group_sizes, user_models, student_model, trainset
         clients_dict = clients_dict_ag
     else:
         raise Exception('Invalid dataset name')
+    
+    device = torch.device('mps') if args['gpu'] else 'cpu'
 
     student_model.train()
+    student_model.to(device)
     if (args['optimizer'] == 'sgd'):
-        student_optimizer = torch.optim.SGD(student_model.parameters(), lr=args.lr, momentum=0.5)
+        student_optimizer = torch.optim.SGD(student_model.parameters(), lr=args['lr'], momentum=0.9, weight_decay=5e-4)
 
     if (args['optimizer'] == 'adam'):
-        student_optimizer = torch.optim.Adam(student_model.parameters(), lr=args.lr, weight_decay=1e-4)
-    
-    device = 'cuda' if args['gpu'] else 'cpu'
+        student_optimizer = torch.optim.Adam(student_model.parameters(), lr=args['lr'], weight_decay=1e-4)
     
     t_loss = {}
     v_loss = {}
@@ -132,10 +133,11 @@ def train_fedhat(args, groups, group_sizes, user_models, student_model, trainset
 
     for client in range(args['num_clients']):
         model = user_models[client]
+        model.to(device)
         trainloader = load_client_config(clients_dict, trainset, client, args['local_bs'])
 
         if (args['optimizer'] == 'sgd'):
-            teacher_optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=0.5)
+            teacher_optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=0.9, weight_decay=5e-4)
 
         if (args['optimizer'] == 'adam'):
             teacher_optimizer = torch.optim.Adam(model.parameters(), lr=args['lr'], weight_decay=1e-4)
@@ -303,7 +305,7 @@ def main_CIFAR10(args):
     print("Evaluation: ")
     acc = {}
     loss = {}
-    device = 'cuda' if args['gpu'] else 'cpu'
+    device = torch.device('mps') if args['gpu'] else 'cpu'
     for client in range(args['num_clients']):
         a, l = inference(user_models[client], device, F.cross_entropy, 
                          DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
@@ -352,7 +354,7 @@ def main_AG_NEWS(args):
     print("Evaluation: ")
     acc = {}
     loss = {}
-    device = 'cuda' if args['gpu'] else 'cpu'
+    device = torch.device('mps') if args['gpu'] else 'cpu'
     for client in range(args['num_clients']):
         a, l = inference(user_models[client], device, F.cross_entropy, 
                          DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
@@ -375,17 +377,17 @@ if __name__ == '__main__':
     os.environ['num_vgg_models'] = "4"
     os.environ['num_charcnn_models'] = "3"
 
-    # `num_clients` should generally NOT be changed
+    # don't change unless using a custom configuration for clients' data distributions
     parser.add_argument('--num_clients', type=int, default=40)
 
     parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10', 'AG_NEWS'])
     parser.add_argument('--method', type=str, required=True, choices=['isolated', 'clustered', 'fedhat'])
     parser.add_argument('--gpu', type=bool, default=False)
-    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'])
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--optimizer', type=str, default='sgd', choices=['adam', 'sgd'])
+    parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--local_bs', type=int, default=32)
-    parser.add_argument('--local_ep', type=int, default=7)
+    parser.add_argument('--local_bs', type=int, default=64)
+    parser.add_argument('--local_ep', type=int, default=10)
     parser.add_argument('--logging', type=bool, default=False)
     
     args = parser.parse_args()
@@ -393,7 +395,7 @@ if __name__ == '__main__':
     clients_dict_cifar = parse_data_config('data/cifar_config.json')
     clients_dict_ag = parse_data_config('data/ag_news_config.json')
 
-    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2
+    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2 --gpu True
     # python3 main.py --num_clients 40 --dataset AG_NEWS --method isolated --logging True --local_ep 2
 
     if (args.dataset == 'CIFAR10'):

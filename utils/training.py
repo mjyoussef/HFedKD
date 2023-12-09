@@ -11,14 +11,15 @@ class LocalUpdate(object):
         self.client_id = self.args['client_id']
         self.trainloader = load_client_config(self.args['clients_dict'], dataset, 
                                               self.args['client_id'], self.args['local_bs'])
-        self.device = 'cuda' if self.args['gpu'] else 'cpu'
+        self.device = torch.device('mps') if args['gpu'] else 'cpu'
         self.loss = nn.CrossEntropyLoss().to(self.device)
     
     def update_weights(self, model):
         model.train(True)
+        model.to(self.device)
 
         if self.args['optimizer'] == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'], momentum=0.5)
+            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'], momentum=0.9, weight_decay=5e-4)
         if self.args['optimizer']  == 'adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=self.args['lr'], weight_decay=1e-4)
             
@@ -49,6 +50,7 @@ class LocalUpdate(object):
 
 def inference(model, device, loss, testloader):
     model.eval()
+    model.to(device)
     batch_loss, total, correct = [], 0.0, 0.0
 
     with torch.no_grad():
