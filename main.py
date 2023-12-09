@@ -9,12 +9,12 @@ from torch.utils.data import random_split
 from models.vgg import *
 from models.char_cnn import *
 from torchvision import datasets
-from torchvision.transforms import transforms, ToTensor
+from torchvision.transforms import transforms
 from torch.utils.data import DataLoader
 
 ############################ TRAINING SUBROUTINES ############################
 
-def train_isolated(args, groups, group_size, user_models, trainset, valset, dataset_name):
+def train_isolated(args, groups, group_sizes, user_models, trainset, valset, dataset_name):
     '''Isolated training subroutine (per epoch)'''
     t_loss = {}
     v_loss = {}
@@ -46,13 +46,13 @@ def train_isolated(args, groups, group_size, user_models, trainset, valset, data
     
     # average losses and accuracies for each group
     for key in t_loss:
-        t_loss[key] /= group_size
-        v_loss[key] /= group_size
-        acc[key] /= group_size
+        t_loss[key] /= group_sizes[key]
+        v_loss[key] /= group_sizes[key]
+        acc[key] /= group_sizes[key]
     
     return t_loss, v_loss, acc
 
-def train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
+def train_clustered(args, groups, group_sizes, user_models, trainset, valset, dataset_name):
     '''Clustered federated learning subroutine (per epoch)'''
     t_loss = {}
     v_loss = {}
@@ -102,13 +102,13 @@ def train_clustered(args, groups, group_size, user_models, trainset, valset, dat
 
     # average losses and accuracies for each group
     for key in t_loss:
-        t_loss[key] /= group_size
-        v_loss[key] /= group_size
-        acc[key] /= group_size
+        t_loss[key] /= group_sizes[key]
+        v_loss[key] /= group_sizes[key]
+        acc[key] /= group_sizes[key]
     
     return t_loss, v_loss, acc
 
-def train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
+def train_fedhat(args, groups, group_sizes, user_models, student_model, trainset, valset, dataset_name):
     '''FedHAT training subroutine (per epoch)'''
     if (dataset_name == 'CIFAR10'):
         clients_dict = clients_dict_cifar
@@ -146,6 +146,9 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
             for batch, (X, y) in enumerate(trainloader):
                 X, y = X.to(device), y.to(device)
 
+                teacher_optimizer.zero_grad()
+                student_optimizer.zero_grad()
+
                 pred_s = student_model(X)
                 pred_t = model(X)
 
@@ -158,11 +161,9 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
                 output_t = task_loss_t + distill_loss_t
                 output_s = task_loss_s + distill_loss_s
 
-                teacher_optimizer.zero_grad()
                 output_t.backward()
                 teacher_optimizer.step()
 
-                student_optimizer.zero_grad()
                 output_s.backward()
                 student_optimizer.step()
 
@@ -186,51 +187,74 @@ def train_fedhat(args, groups, group_size, user_models, student_model, trainset,
         acc[groups[client]] = acc.get(groups[client], 0) + acc_client
 
     # average losses and accuracies for each group
-    for group in t_loss:
-        t_loss[group] /= group_size
-        v_loss[group] /= group_size
-        acc[group] /= group_size
+    for key in t_loss:
+        t_loss[key] /= group_sizes[key]
+        v_loss[key] /= group_sizes[key]
+        acc[key] /= group_sizes[key]
     
     return t_loss, v_loss, acc
 
 def create_groups_vgg(num_clients):
     groups = {}
+    group_sizes = {}
     user_models = {}
 
-    clients_per_model = num_clients / 4
+    clients_per_model = num_clients // 4
+    counter, group = 0, -1
+    rem = num_clients % 4
     for i in range(num_clients):
-        if (i < 1 * (clients_per_model)):
-            groups[i] = 0
+        if (counter == 0):
+            counter = clients_per_model
+            if (rem > 0):
+                counter += 1
+                rem -= 1
+            group += 1
+            group_sizes[group] = counter
+        
+        groups[i] = group
+        
+        if (group == 0):
             user_models[i] = vgg11()
-        elif (i < 2 * (clients_per_model)):
-            groups[i] = 1
+        elif (group == 1):
             user_models[i] = vgg13()
-        elif (i < 3 * (clients_per_model)):
-            groups[i] = 2
+        elif (group == 2):
             user_models[i] = vgg16()
         else:
-            groups[i] = 3
             user_models[i] = vgg19()
+        
+        counter -= 1
     
-    return groups, user_models
+    return groups, group_sizes, user_models
 
 def create_groups_char_cnn(num_clients, in_channels):
     groups = {}
+    group_sizes = {}
     user_models = {}
 
-    clients_per_model = num_clients / 3
+    clients_per_model = num_clients // 3
+    counter, group = 0, -1
+    rem = num_clients % 3
     for i in range(num_clients):
-        if (i < 1 * (clients_per_model)):
-            groups[i] = 0
+        if (counter == 0):
+            counter = clients_per_model
+            if (rem > 0):
+                counter += 1
+                rem -= 1
+            group += 1
+            group_sizes[group] = counter
+        
+        groups[i] = group
+        
+        if (group == 0):
             user_models[i] = CharCNN(in_channels, 256, dropout=0.2)
-        elif (i < 2 * (clients_per_model)):
-            groups[i] = 1
+        elif (group == 1):
             user_models[i] = CharCNN(in_channels, 512, dropout=0.2)
         else:
-            groups[i] = 2
             user_models[i] = CharCNN(in_channels, 1024, dropout=0.2)
+        
+        counter -= 1
     
-    return groups, user_models
+    return groups, group_sizes, user_models
 
 
 ############################ TRAINING LOOPS ############################
@@ -238,7 +262,7 @@ def create_groups_char_cnn(num_clients, in_channels):
 def main_CIFAR10(args):
 
     # assign models to clients
-    groups, user_models = create_groups_vgg(args['num_clients'])
+    groups, group_sizes, user_models = create_groups_vgg(args['num_clients'])
 
     transform = transforms.Compose(
         [transforms.ToTensor(), 
@@ -261,17 +285,16 @@ def main_CIFAR10(args):
     gen = torch.Generator().manual_seed(int(os.environ['seed']))
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
-    group_size = args['num_clients'] // int(os.environ['num_vgg_models'])
     for i in range(args['epochs']):
         if (args['method'] == 'isolated'):
-            train_isolated(args, groups, group_size, user_models, 
+            train_isolated(args, groups, group_sizes, user_models, 
                            trainset, val_set, 'CIFAR10')
         elif (args['method'] == 'clustered'):
-            train_clustered(args, groups, group_size, user_models,
+            train_clustered(args, groups, group_sizes, user_models,
                             trainset, val_set, 'CIFAR10')
         elif (args['method'] == 'fedhat'):
             student_model = vggStudent()
-            train_fedhat(args, groups, group_size, user_models, student_model,
+            train_fedhat(args, groups, group_sizes, user_models, student_model,
                          trainset, val_set, 'CIFAR10') 
         else:
             raise Exception('Invalid method provided')
@@ -289,8 +312,8 @@ def main_CIFAR10(args):
 
     # average accuracies and losses for groups
     for group in loss:
-        loss[group] /= group_size
-        acc[group] /= group_size
+        loss[group] /= group_sizes[group]
+        acc[group] /= group_sizes[group]
     
     print(f"Accuracy: {acc}")
     print(f"Loss: {loss}")
@@ -304,24 +327,23 @@ def main_AG_NEWS(args):
     in_channels = trainset.alphabet_size
 
     # assign models to clients
-    groups, user_models = create_groups_char_cnn(args['num_clients'], in_channels)
+    groups, group_sizes, user_models = create_groups_char_cnn(args['num_clients'], in_channels)
 
     gen = torch.Generator().manual_seed(int(os.environ['seed']))
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
-    group_size = args['num_clients'] // int(os.environ['num_charcnn_models'])
     for i in range(args['epochs']):
         if (args['method'] == 'isolated'):
-            train_isolated(args, groups, group_size, user_models, 
+            train_isolated(args, groups, group_sizes, user_models, 
                            trainset, val_set, 'AG_NEWS')
         elif (args['method'] == 'clustered'):
             # train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
-            train_clustered(args, groups, group_size, user_models,
+            train_clustered(args, groups, group_sizes, user_models,
                             trainset, val_set, 'AG_NEWS')
         elif (args['method'] == 'fedhat'):
             student_model = CharCNN(in_channels, 128, dropout=0.1)
             # train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
-            train_fedhat(args, groups, group_size, user_models, student_model,
+            train_fedhat(args, groups, group_sizes, user_models, student_model,
                          trainset, val_set, 'AG_NEWS')
         else:
             raise Exception('Invalid method provided')
@@ -339,8 +361,8 @@ def main_AG_NEWS(args):
     
     # average accuracies and losses among groups
     for group in loss:
-        loss[group] /= group_size
-        acc[group] /= group_size
+        loss[group] /= group_sizes[group]
+        acc[group] /= group_sizes[group]
     
     print(f"Accuracy: {acc}")
     print(f"Loss: {loss}")

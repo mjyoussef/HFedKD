@@ -28,10 +28,10 @@ class LocalUpdate(object):
             for batch, (X, y) in enumerate(self.trainloader):
                 X, y = X.to(self.device), y.to(self.device)
 
+                optimizer.zero_grad()
                 pred = model(X)
                 loss = self.loss(pred, y)
 
-                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
 
