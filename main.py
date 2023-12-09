@@ -117,7 +117,7 @@ def train_fedhat(args, groups, group_sizes, user_models, student_model, trainset
     else:
         raise Exception('Invalid dataset name')
     
-    device = torch.device('mps') if args['gpu'] else 'cpu'
+    device = args['device']
 
     student_model.train()
     student_model.to(device)
@@ -382,7 +382,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10', 'AG_NEWS'])
     parser.add_argument('--method', type=str, required=True, choices=['isolated', 'clustered', 'fedhat'])
-    parser.add_argument('--gpu', type=bool, default=False)
+    parser.add_argument('--device', type=str, required=True, choices=['cpu', 'cuda', 'mps'])
     parser.add_argument('--optimizer', type=str, default='sgd', choices=['adam', 'sgd'])
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--epochs', type=int, default=50)
@@ -395,8 +395,8 @@ if __name__ == '__main__':
     clients_dict_cifar = parse_data_config('data/cifar_config.json')
     clients_dict_ag = parse_data_config('data/ag_news_config.json')
 
-    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2 --gpu True
-    # python3 main.py --num_clients 40 --dataset AG_NEWS --method isolated --logging True --local_ep 2
+    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2 --device mps
+    # python3 main.py --num_clients 40 --dataset AG_NEWS --method isolated --logging True --local_ep 2 --device mps
 
     if (args.dataset == 'CIFAR10'):
         main_CIFAR10(vars(args))

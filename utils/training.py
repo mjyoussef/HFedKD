@@ -11,7 +11,8 @@ class LocalUpdate(object):
         self.client_id = self.args['client_id']
         self.trainloader = load_client_config(self.args['clients_dict'], dataset, 
                                               self.args['client_id'], self.args['local_bs'])
-        self.device = torch.device('mps') if args['gpu'] else 'cpu'
+        
+        self.device = args['device']
         self.loss = nn.CrossEntropyLoss().to(self.device)
     
     def update_weights(self, model):
