@@ -5,6 +5,7 @@ import torch
 import json
 import csv
 import numpy as np
+import os
 import argparse
 
 class DatasetSplit(Dataset):
@@ -82,12 +83,13 @@ class AGNEWS(Dataset):
         class_weight = [num_samples/float(self.label.count(c)) for c in label_set]    
         return class_weight, num_class
        
-def create_client_config(config_path, num_users, dataset, type):
+def create_client_config(num_users, dataset, type):
     '''
     config_path: txt file for configs (one for CIFAR-10 and one for AG_NEWS)
 
     allocates non-iid data samples for each client
     '''
+    np.random.seed(int(os.environ['seed']))
     num_shards = num_users * 2
     num_samples = len(dataset) // num_shards
     idx_shard = [i for i in range(num_shards)]
@@ -107,51 +109,15 @@ def create_client_config(config_path, num_users, dataset, type):
     idxs = tups[:, 1]
 
     # divide and assign
-    dict_users_lsts = {}
     for i in range(num_users):
         rand_set = set(np.random.choice(idx_shard, 2, replace=False))
         idx_shard = list(set(idx_shard) - rand_set)
         for rand in rand_set:
             dict_users[i] = np.concatenate((dict_users[i], idxs[rand*num_samples:(rand+1)*num_samples]), axis=0)
-            dict_users_lsts[i] = dict_users[i].tolist()
     
-    with open(config_path, 'w') as file:
-        json.dump(dict_users_lsts, file)
-
-def parse_data_config(path):
-    with open(path) as f:
-        clients_dict_lsts = json.load(f)
-
-    clients_dict = {}
-    for key in clients_dict_lsts:
-        clients_dict[key] = np.array(clients_dict_lsts[key])
-    
-    return clients_dict
+    return dict_users
 
 def load_client_config(clients_dict, dataset, client_id, bs):
     indices = clients_dict[str(client_id)]
     trainloader = DataLoader(DatasetSplit(dataset, indices), batch_size=bs, shuffle=True)
     return trainloader
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config_path', type=str, required=True)
-    parser.add_argument('--num_users', type=int, required=True)
-    parser.add_argument('--dataset', type=str, required=True)
-
-    args = parser.parse_args()
-    if (args.dataset == 'AG_NEWS'):
-        data_path = '../data/ag_train.csv'
-        alphabet_path = '../data/alphabet.json'
-        dataset = AGNEWS(data_path, alphabet_path)
-    elif (args.dataset == 'CIFAR10'):
-        dataset = datasets.CIFAR10(
-            root="../data",
-            train=True,
-            download=True,
-            transform=ToTensor(),
-        )
-    else:
-        raise Exception('Invalid dataset provided')
-    
-    create_client_config(args.config_path, args.num_users, dataset, args.dataset)

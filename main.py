@@ -4,13 +4,17 @@ import argparse
 import os
 import json
 from utils.training import LocalUpdate, average_weights, inference
-from utils.data_loader import load_client_config, AGNEWS, parse_data_config
+from utils.data_loader import load_client_config, AGNEWS, create_client_config
 from torch.nn import functional as F
 from models.vgg import *
 from models.char_cnn import *
 from torchvision import datasets
 from torchvision.transforms import transforms
 from torch.utils.data import DataLoader, random_split
+
+# global references
+clients_dict_cifar = None
+clients_dict_ag = None
 
 ############################ TRAINING SUBROUTINES ############################
 
@@ -312,6 +316,9 @@ def main_CIFAR10(args):
         transform=transform,
     )
 
+    global clients_dict_ag
+    clients_dict_ag = create_client_config(args['num_clients'], trainset, 'CIFAR10')
+
     gen = torch.Generator().manual_seed(int(os.environ['seed']))
     val_set, test_set = random_split(test_and_val_set, [0.5, 0.5], gen)
 
@@ -360,6 +367,9 @@ def main_AG_NEWS(args):
     in_channels = trainset.alphabet_size
 
     t_loss, v_loss, acc_training = {}, {}, {}
+
+    global clients_dict_ag
+    clients_dict_ag = create_client_config(args['num_clients'], trainset, 'AG_NEWS')
 
     # assign models to clients
     groups, group_sizes, user_models = create_groups_char_cnn(args['num_clients'], in_channels)
@@ -421,9 +431,6 @@ if __name__ == '__main__':
     parser.add_argument('--logging', type=bool, default=False)
     
     args = parser.parse_args()
-
-    clients_dict_cifar = parse_data_config('data/cifar_config.json')
-    clients_dict_ag = parse_data_config('data/ag_news_config.json')
 
     if (args.dataset == 'CIFAR10'):
         main_CIFAR10(vars(args))
