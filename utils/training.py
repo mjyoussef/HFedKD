@@ -16,11 +16,11 @@ class LocalUpdate(object):
         self.loss = nn.CrossEntropyLoss().to(self.device)
     
     def update_weights(self, model):
-        model.train(True)
         model.to(self.device)
+        model.train()
 
         if self.args['optimizer'] == 'sgd':
-            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'], momentum=0.9, weight_decay=5e-4)
+            optimizer = torch.optim.SGD(model.parameters(), lr=self.args['lr'], momentum=0.9, weight_decay=1e-4)
         if self.args['optimizer']  == 'adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=self.args['lr'], weight_decay=1e-4)
             
@@ -42,7 +42,7 @@ class LocalUpdate(object):
             epoch_loss += [sum(batch_loss) / len(batch_loss)]
             if (self.args['logging']):
                 print(f"Client: {self.client_id} / Epoch: {epoch} / Loss: {epoch_loss[-1]}")
-        
+                
         return model.state_dict(), epoch_loss[-1]
             
     def inference(self, model, testset):
@@ -50,8 +50,8 @@ class LocalUpdate(object):
         return inference(model, self.device, self.loss, testloader)
 
 def inference(model, device, loss, testloader):
-    model.eval()
     model.to(device)
+    model.eval()
     batch_loss, total, correct = [], 0.0, 0.0
 
     with torch.no_grad():

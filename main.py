@@ -2,15 +2,15 @@ import torch
 import copy
 import argparse
 import os
+import json
 from utils.training import LocalUpdate, average_weights, inference
 from utils.data_loader import load_client_config, AGNEWS, parse_data_config
 from torch.nn import functional as F
-from torch.utils.data import random_split
 from models.vgg import *
 from models.char_cnn import *
 from torchvision import datasets
 from torchvision.transforms import transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 ############################ TRAINING SUBROUTINES ############################
 
@@ -34,6 +34,7 @@ def train_isolated(args, groups, group_sizes, user_models, trainset, valset, dat
         model = user_models[client]
         model_params, t_l = updater.update_weights(model)
         acc_client, v_l = updater.inference(model, valset)
+        del updater, model_params
 
         # training loss
         t_loss[groups[client]] = t_loss.get(groups[client], 0) + t_l
@@ -265,6 +266,7 @@ def main_CIFAR10(args):
 
     # assign models to clients
     groups, group_sizes, user_models = create_groups_vgg(args['num_clients'])
+    t_loss, v_loss, acc_training = {}, {}, {}
 
     transform = transforms.Compose(
         [transforms.ToTensor(), 
@@ -289,15 +291,15 @@ def main_CIFAR10(args):
 
     for i in range(args['epochs']):
         if (args['method'] == 'isolated'):
-            train_isolated(args, groups, group_sizes, user_models, 
-                           trainset, val_set, 'CIFAR10')
+            t_loss[i], v_loss[i], acc_training[i] = train_isolated(args, groups, group_sizes, user_models, 
+                                                          trainset, val_set, 'CIFAR10')
         elif (args['method'] == 'clustered'):
-            train_clustered(args, groups, group_sizes, user_models,
-                            trainset, val_set, 'CIFAR10')
+            t_loss[i], v_loss[i], acc_training[i] = train_clustered(args, groups, group_sizes, user_models,
+                                                           trainset, val_set, 'CIFAR10')
         elif (args['method'] == 'fedhat'):
             student_model = vggStudent()
-            train_fedhat(args, groups, group_sizes, user_models, student_model,
-                         trainset, val_set, 'CIFAR10') 
+            t_loss[i], v_loss[i], acc_training[i] = train_fedhat(args, groups, group_sizes, user_models, student_model,
+                                                        trainset, val_set, 'CIFAR10')
         else:
             raise Exception('Invalid method provided')
     
@@ -305,7 +307,7 @@ def main_CIFAR10(args):
     print("Evaluation: ")
     acc = {}
     loss = {}
-    device = torch.device('mps') if args['gpu'] else 'cpu'
+    device = args['device']
     for client in range(args['num_clients']):
         a, l = inference(user_models[client], device, F.cross_entropy, 
                          DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
@@ -316,6 +318,23 @@ def main_CIFAR10(args):
     for group in loss:
         loss[group] /= group_sizes[group]
         acc[group] /= group_sizes[group]
+    
+
+    # store intermediate and final results
+    with open(args['t_loss_path'], 'w') as file:
+        json.dump(t_loss, file)
+
+    with open(args['v_loss_path'], 'w') as file:
+        json.dump(v_loss, file)
+
+    with open(args['acc_training_path'], 'w') as file:
+        json.dump(acc_training, file)
+    
+    with open(args['acc_path'], 'w') as file:
+        json.dump(acc, file)
+
+    with open(args['loss_path'], 'w') as file:
+        json.dump(loss, file)
     
     print(f"Accuracy: {acc}")
     print(f"Loss: {loss}")
@@ -328,6 +347,8 @@ def main_AG_NEWS(args):
     test_and_val_set = AGNEWS(test_path, alphabet_path)
     in_channels = trainset.alphabet_size
 
+    t_loss, v_loss, acc_training = {}, {}, {}
+
     # assign models to clients
     groups, group_sizes, user_models = create_groups_char_cnn(args['num_clients'], in_channels)
 
@@ -336,17 +357,17 @@ def main_AG_NEWS(args):
 
     for i in range(args['epochs']):
         if (args['method'] == 'isolated'):
-            train_isolated(args, groups, group_sizes, user_models, 
-                           trainset, val_set, 'AG_NEWS')
+            t_loss[i], v_loss[i], acc_training[i] = train_isolated(args, groups, group_sizes, user_models, 
+                                                                   trainset, val_set, 'AG_NEWS')
         elif (args['method'] == 'clustered'):
             # train_clustered(args, groups, group_size, user_models, trainset, valset, dataset_name):
-            train_clustered(args, groups, group_sizes, user_models,
-                            trainset, val_set, 'AG_NEWS')
+            t_loss[i], v_loss[i], acc_training[i] = train_clustered(args, groups, group_sizes, user_models,
+                                                                    trainset, val_set, 'AG_NEWS')
         elif (args['method'] == 'fedhat'):
             student_model = CharCNN(in_channels, 128, dropout=0.1)
             # train_fedhat(args, groups, group_size, user_models, student_model, trainset, valset, dataset_name):
-            train_fedhat(args, groups, group_sizes, user_models, student_model,
-                         trainset, val_set, 'AG_NEWS')
+            t_loss[i], v_loss[i], acc_training[i] = train_fedhat(args, groups, group_sizes, user_models, student_model,
+                                                                 trainset, val_set, 'AG_NEWS')
         else:
             raise Exception('Invalid method provided')
     
@@ -354,7 +375,7 @@ def main_AG_NEWS(args):
     print("Evaluation: ")
     acc = {}
     loss = {}
-    device = torch.device('mps') if args['gpu'] else 'cpu'
+    device = args['device']
     for client in range(args['num_clients']):
         a, l = inference(user_models[client], device, F.cross_entropy, 
                          DataLoader(test_set, batch_size=len(test_set)//10, shuffle=False))
@@ -366,6 +387,22 @@ def main_AG_NEWS(args):
         loss[group] /= group_sizes[group]
         acc[group] /= group_sizes[group]
     
+    # store intermediate and final results
+    with open(args['t_loss_path'], 'w') as file:
+        json.dump(t_loss, file)
+
+    with open(args['v_loss_path'], 'w') as file:
+        json.dump(v_loss, file)
+
+    with open(args['acc_training_path'], 'w') as file:
+        json.dump(acc_training, file)
+    
+    with open(args['acc_path'], 'w') as file:
+        json.dump(acc, file)
+
+    with open(args['loss_path'], 'w') as file:
+        json.dump(loss, file)
+    
     print(f"Accuracy: {acc}")
     print(f"Loss: {loss}")
 
@@ -374,11 +411,9 @@ if __name__ == '__main__':
 
     # hardcoded variables
     os.environ['seed'] = "100"
-    os.environ['num_vgg_models'] = "4"
-    os.environ['num_charcnn_models'] = "3"
 
     # don't change unless using a custom configuration for clients' data distributions
-    parser.add_argument('--num_clients', type=int, default=40)
+    parser.add_argument('--num_clients', type=int, default=24)
 
     parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10', 'AG_NEWS'])
     parser.add_argument('--method', type=str, required=True, choices=['isolated', 'clustered', 'fedhat'])
@@ -389,13 +424,18 @@ if __name__ == '__main__':
     parser.add_argument('--local_bs', type=int, default=64)
     parser.add_argument('--local_ep', type=int, default=10)
     parser.add_argument('--logging', type=bool, default=False)
+    parser.add_argument('--t_loss_path', type=str, default='outputs/t_loss.json')
+    parser.add_argument('--v_loss_path', type=str, default='outputs/v_loss.json')
+    parser.add_argument('--acc_training_path', type=str, default='outputs/acc_training.json')
+    parser.add_argument('--acc_path', type=str, default='outputs/acc.json')
+    parser.add_argument('--loss_path', type=str, default='outputs/loss.json')
     
     args = parser.parse_args()
 
     clients_dict_cifar = parse_data_config('data/cifar_config.json')
     clients_dict_ag = parse_data_config('data/ag_news_config.json')
 
-    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2 --device mps
+    # python3 main.py --num_clients 40 --dataset CIFAR10 --method isolated --logging True --local_ep 2 --device mps 
     # python3 main.py --num_clients 40 --dataset AG_NEWS --method isolated --logging True --local_ep 2 --device mps
 
     if (args.dataset == 'CIFAR10'):

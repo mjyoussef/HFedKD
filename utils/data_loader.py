@@ -141,12 +141,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     if (args.dataset == 'AG_NEWS'):
-        data_path = 'data/ag_train.csv'
-        alphabet_path = 'data/alphabet.json'
+        data_path = '../data/ag_train.csv'
+        alphabet_path = '../data/alphabet.json'
         dataset = AGNEWS(data_path, alphabet_path)
     elif (args.dataset == 'CIFAR10'):
         dataset = datasets.CIFAR10(
-            root="data",
+            root="../data",
             train=True,
             download=True,
             transform=ToTensor(),

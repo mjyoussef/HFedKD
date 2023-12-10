@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.functional as F
 
 class CharCNN(nn.Module):
     def __init__(self, in_channels, out_channels, dropout):
@@ -50,7 +51,8 @@ class CharCNN(nn.Module):
         )
 
         self.fc3 = nn.Linear(1024, 4)
-        self.softmax = nn.Softmax()
+        
+        self.softmax = F.softmax
 
     def forward(self, x):
         x = self.conv1(x)
@@ -69,6 +71,10 @@ class CharCNN(nn.Module):
         # linear layer
         x = self.fc3(x)
         # output layer
-        x = self.softmax(x)
+        
+        if (self.temp):
+            x = self.softmax(x / self.temp)
+        else:
+            x = self.softmax(x)
         
         return x

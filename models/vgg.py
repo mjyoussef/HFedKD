@@ -1,6 +1,6 @@
 import math
-
 import torch.nn as nn
+import torch.nn.functional as F
 
 __all__ = [
     'VGG', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn',
@@ -21,9 +21,9 @@ class VGG(nn.Module):
             nn.Dropout(),
             nn.Linear(4096, 4096),
             nn.ReLU(True),
-            nn.Linear(4096, 10),
+            nn.Linear(4096, 10)
         )
-        self.log_softmax = nn.Softmax()
+        self.softmax = F.softmax
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -36,7 +36,10 @@ class VGG(nn.Module):
         x = self.features(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)
-        x = self.log_softmax(x)
+        if (self.temp):
+            x = self.softmax(x / self.temp, dim=-1)
+        else:
+            x = self.softmax(x, dim=-1)
         return x
 
 
@@ -55,14 +58,13 @@ def make_layers(cfg, batch_norm=False):
             in_channels = v
     return nn.Sequential(*layers)
 
-
 cfg = {
     'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
     'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M',
           512, 512, 512, 512, 'M'],
-    'T': [32, 'M', 64, 'M', 64, 64, 'M', 128, 128, 'M', 128, 128, 'M']
+    'T': [32, 'M', 64, 'M', 64, 64, 'M', 128, 128, 'M', 512, 512, 'M']
 }
 
 def vgg11():
