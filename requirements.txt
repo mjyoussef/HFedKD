@@ -1,0 +1,4 @@
+# This project requires Python 3.6 or higher
+torch
+numpy
+fastapi

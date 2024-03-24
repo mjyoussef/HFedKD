@@ -1,6 +1,7 @@
 import math
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 __all__ = [
     'VGG', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn',
@@ -11,7 +12,7 @@ class VGG(nn.Module):
     '''
     Base VGG model
     '''
-    def __init__(self, features):
+    def __init__(self, features: nn.Module) -> None:
         super(VGG, self).__init__()
         self.features = features
         self.classifier = nn.Sequential(
@@ -32,18 +33,18 @@ class VGG(nn.Module):
                 m.bias.data.zero_()
 
 
-    def forward(self, x):
+    def forward(self, x: Tensor, temperature=None) -> Tensor:
         x = self.features(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)
-        if (self.temp):
-            x = self.softmax(x / self.temp, dim=-1)
+        if (temperature):
+            x = self.softmax(x / temperature, dim=-1)
         else:
             x = self.softmax(x, dim=-1)
         return x
 
 
-def make_layers(cfg, batch_norm=False):
+def make_layers(cfg, batch_norm=False) -> nn.Module:
     layers = []
     in_channels = 3
     for v in cfg:
@@ -67,45 +68,45 @@ cfg = {
     'T': [32, 'M', 64, 'M', 64, 64, 'M', 128, 128, 'M', 512, 512, 'M']
 }
 
-def vgg11():
+def vgg11() -> nn.Module:
     """VGG 11-layer model (configuration "A")"""
     return VGG(make_layers(cfg['A']))
 
 
-def vgg11_bn():
+def vgg11_bn() -> nn.Module:
     """VGG 11-layer model (configuration "A") with batch normalization"""
     return VGG(make_layers(cfg['A'], batch_norm=True))
 
 
-def vgg13():
+def vgg13() -> nn.Module:
     """VGG 13-layer model (configuration "B")"""
     return VGG(make_layers(cfg['B']))
 
 
-def vgg13_bn():
+def vgg13_bn() -> nn.Module:
     """VGG 13-layer model (configuration "B") with batch normalization"""
     return VGG(make_layers(cfg['B'], batch_norm=True))
 
 
-def vgg16():
+def vgg16() -> nn.Module:
     """VGG 16-layer model (configuration "D")"""
     return VGG(make_layers(cfg['D']))
 
 
-def vgg16_bn():
+def vgg16_bn() -> nn.Module:
     """VGG 16-layer model (configuration "D") with batch normalization"""
     return VGG(make_layers(cfg['D'], batch_norm=True))
 
 
-def vgg19():
+def vgg19() -> nn.Module:
     """VGG 19-layer model (configuration "E")"""
     return VGG(make_layers(cfg['E']))
 
 
-def vgg19_bn():
+def vgg19_bn() -> nn.Module:
     """VGG 19-layer model (configuration 'E') with batch normalization"""
     return VGG(make_layers(cfg['E'], batch_norm=True))
 
-def vggStudent():
+def vggStudent() -> nn.Module:
     """Teacher model based on VGG-11 without batch normalization"""
     return VGG(make_layers(cfg['T']))
