@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.functional as F
+from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from typing import Dict, Tuple, Any
 import copy
