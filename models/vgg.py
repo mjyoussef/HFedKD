@@ -9,7 +9,7 @@ __all__ = [
 
 class VGG(nn.Module):
     '''
-    VGG model
+    Base VGG model
     '''
     def __init__(self, features):
         super(VGG, self).__init__()

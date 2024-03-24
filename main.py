@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, random_split
 # global references
 clients_dict_cifar = None
 clients_dict_ag = None
+os.environ['seed'] = "100"
 
 ############################ TRAINING SUBROUTINES ############################
 
@@ -118,31 +119,32 @@ def train_clustered(args, groups, group_sizes, user_models, trainset, valset, da
     return t_loss, v_loss, acc
 
 def distill(optimizer, target, source, X, y, weights=[0.8, 0.2], temp=2):
+    '''Knowledge distillation from source to target.
+    
+    Note: a default temperature (`temp`) = 2 is used in the softmax object'''
     optimizer.zero_grad()
     
-    target.temp = temp
-    source.temp = temp
+    target.temp, source.temp = temp, temp
     
     with torch.no_grad():
         source_out = source(X)
     
     target_out = target(X)
     
-    task_source = F.cross_entropy(source_out, y)
-    task_target = F.cross_entropy(target_out, y)
+    target_task_loss = F.cross_entropy(target_out, y)
     
     distill_loss = F.kl_div(source_out, target_out)
     
-    total_loss = (weights[0] * task_target) + (weights[1] * distill_loss)
+    total_loss = (weights[0] * target_task_loss) + (weights[1] * distill_loss)
+
     total_loss.backward()
     optimizer.step()
     
-    target.temp = None
-    source.temp = None
+    target.temp, source.temp = None, None
     return total_loss.item()
 
 def train_fedhat(args, groups, group_sizes, user_models, student_model, trainset, valset, dataset_name):
-    '''FedHAT training subroutine (per epoch)'''
+    '''HFedKD training subroutine (per epoch)'''
     if (dataset_name == 'CIFAR10'):
         clients_dict = clients_dict_cifar
     elif (dataset_name == 'AG_NEWS'):
@@ -176,9 +178,9 @@ def train_fedhat(args, groups, group_sizes, user_models, student_model, trainset
             batch_loss = []
             for batch, (X, y) in enumerate(trainloader):
                 X, y = X.to(device), y.to(device)
-
+                
                 loss_teacher = distill(teacher_optimizer, model, student_model, X, y)
-                loss_student = distill(student_optimizer, student_model, model, X, y)
+                _ = distill(student_optimizer, student_model, model, X, y)
 
                 batch_loss += [loss_teacher]
             
@@ -418,7 +420,6 @@ def main_AG_NEWS(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    os.environ['seed'] = "100"
     parser.add_argument('--num_clients', type=int, default=24)
     parser.add_argument('--dataset', type=str, required=True, choices=['CIFAR10', 'AG_NEWS'])
     parser.add_argument('--method', type=str, required=True, choices=['isolated', 'clustered', 'fedhat'])
