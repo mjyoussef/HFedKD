@@ -14,11 +14,6 @@ from torch.utils.data import DataLoader, random_split
 from types import Dict, List, Tuple
 import numpy as np
 
-# global references
-clients_dict_cifar = None
-clients_dict_ag = None
-os.environ['seed'] = "100"
-
 ############################ TRAINING SUBROUTINES ############################
 
 def train_isolated(
@@ -478,6 +473,8 @@ def main(
     print(f"Loss: {loss}")
 
 if __name__ == '__main__':
+    os.environ['seed'] = "100"
+    
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--num_clients', type=int, default=24)
