@@ -124,6 +124,28 @@ def create_client_config(
     
     return dict_users
 
+def load_client_dicts_as_json(
+        path: str, 
+        client_dicts: Dict[int, np.ndarray[int]]
+    ) -> None:
+    client_dicts_lst_version = {}
+    for client_id in client_dicts:
+        client_dicts_lst_version[client_id] = client_dicts[client_id].tolist()
+    
+    with open(path, 'w') as f:
+        json.dump(client_dicts_lst_version, f)
+
+def read_client_dicts_from_json(path: str) -> Dict[int, np.ndarray[int]]:
+    client_dicts_lst_version = {}
+    with open(path, 'r') as f:
+        client_dicts_lst_version = json.load(f)
+    
+    client_dicts = {}
+    for client_id in client_dicts_lst_version:
+        client_dicts[int(client_id)] = np.array(client_dicts_lst_version[client_id])
+    
+    return client_dicts
+
 def load_client_loader(
         clients_dict: Dict[int, np.ndarray[int]], 
         dataset: Dataset, 

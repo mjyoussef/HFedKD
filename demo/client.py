@@ -101,7 +101,7 @@ if __name__ == '__main__':
     )
 
     # dataset_indices
-    splitting = json.load('./splits.json')
+    splitting = json.load('./allocations.json')
     dataset_indices = splitting[str(args.client_id)]
 
     # valset, testset
