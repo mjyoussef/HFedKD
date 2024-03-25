@@ -1,25 +1,15 @@
 import argparse
 import os
-import json
-from utils.loading import create_client_config, load_client_dicts_as_json
+from utils.loading import create_client_config, load_client_dicts_as_json, create_groups_vgg
 from torchvision import datasets
 from torchvision.transforms import transforms
-import multiprocessing
+from multiprocessing import Process
 import subprocess
+from typing import List
 
-# def run_script(script_name):
-#     """Function to run a script using subprocess"""
-#     subprocess.run(["python", script_name], check=True)
-
-# # List of scripts to run in parallel
-# scripts = ["script1.py", "script2.py", "script3.py"]
-
-# # Create a process for each script
-# processes = [multiprocessing.Process(target=run_script, args=(script,)) for script in scripts]
-
-# # Start all processes
-# for p in processes:
-#     p.start()
+def run_script(script_name: str, args: List[str]) -> None:
+    """Function to run a script using subprocess"""
+    subprocess.run(["python", script_name] + args, check=True)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -61,6 +51,26 @@ if __name__ == '__main__':
     )
     load_client_dicts_as_json('./allocations.json', client_dicts)
 
+    # assign VGG versions to each of the clients
+    _, _, vgg_versions = create_groups_vgg(int(os.environ['num_clients']))
+
+    processes = []
+
     # launch the server
-        
+    # processes = [Process(target=run_script, args=(script, args)) for script, args in scripts]
+    processes.append(
+        Process(target=run_script, args=('server.py', []))
+    )
+       
     # launch all of the clients
+    for client_id in range(int(os.environ['num_clients'])):
+        command_line_args = [
+            '--client_id', client_id,
+            '--vgg', vgg_versions[client_id]
+        ]
+        processes.append(
+            Process(target=run_script, args=('client.py', command_line_args))
+        )
+    
+    for p in processes:
+        p.start()
