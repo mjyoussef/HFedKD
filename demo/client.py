@@ -21,13 +21,13 @@ class Request(BaseModel):
 app = FastAPI()
 
 @app.get("/rpc")
-async def fl_round(request: Request):
+def fl_round(request: Request) -> Dict[str, str]:
+    # load student model
     args = request.args
     device = args["device"]
-    student_model_weights = deserialize_model(request.student_model, device)
-    student_model.load_state_dict(student_model_weights)
+    student_model.load_state_dict(deserialize_model(request.student_model, device))
 
-    # start of training
+    # training
     student_model.to(device)
     student_model.train()
     model.train()
@@ -66,8 +66,10 @@ if __name__ == '__main__':
     # store the global references
     global student_model, model, trainset, valset, testset, dataset_indices
 
+    # student model
     student_model = vggStudent()
 
+    # model
     if args.vgg == 11:
         model = vgg11()
     elif args.vgg == 13:
@@ -76,7 +78,8 @@ if __name__ == '__main__':
         model = vgg16()
     else:
         model = vgg19()
-
+    
+    # trainset
     transform = transforms.Compose(
         [transforms.ToTensor(), 
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -88,9 +91,11 @@ if __name__ == '__main__':
         transform=transform,
     )
 
+    # dataset_indices
     splitting = json.load('./splits.json')
     dataset_indices = splitting[str(args.client_id)]
 
+    # valset, testset
     evaluation_set = datasets.CIFAR10(
         root="data",
         train=False,

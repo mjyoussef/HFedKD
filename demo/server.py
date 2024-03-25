@@ -1,78 +1,62 @@
 import httpx
 import asyncio
-import argparse
 import torch.nn as nn
 from models.vgg import vggStudent
 from serialization import *
 from utils.training import average_weights
 import os
 
-async def make_rpc_call(
-        args: argparse.Namespace, 
+async def make_rpc_call( 
         client_id: int,
         student_model: nn.Module,
-    ) -> nn.Module:
+    ) -> None | nn.Module:
 
-    url = f"http://{os.environ['ip']}:{os.environ['base_port'] + client_id + 1}/rpc"
-
-    client_args = {
-        "device": args.device,
-        "lr": args.lr,
-        "s_lr": args.s_lr,
-        "momentum": args.momentum,
-        "s_momentum": args.s_momentum,
-        "weight_decay": args.weight_decay,
-        "s_weight_decay": args.s_weight_decay,
-        "local_ep": args.local_ep,
-        "bs": args.bs,
-    }
+    url = f"http://{os.environ['ip']}:{int(os.environ['base_port']) + client_id + 1}/rpc"
 
     async with httpx.AsyncClient() as client:
         # serialize and send to the client
         data_b64 = serialize_model(student_model)
-        response = await client.post(url, json={"student_model": data_b64, "args": client_args})
+        response = await client.post(url, json={"student_model": data_b64})
+
+        if response.status_code != 200:
+            return None
         
-        # make sure the response was successful
-        response.raise_for_status()
-        
-        # update the list of student models (in the future,
-        # we'll pass these into FedAvg and use the resulting student model
-        # in future rounds of FL)
+        # get the updated student model weights
         response_data = await response.json()
-        student_model_weights = deserialize_model(response_data.get("student_model"), args.device)
+        
+        if "student_model" not in response_data:
+            return None
+        
+        # deserialize and return the student model; return None if there is problem
+        student_model_weights = deserialize_model(response_data.get("student_model"), os.environ['device'])
         return student_model_weights
     
-async def main(args):
+async def main() -> None:
     student_model = vggStudent()
+    epochs = int(os.environ['epochs'])
+    num_clients = int(os.environ['num_clients'])
 
-    for epoch in range(args.epochs):
-        calls = []
-        for client_id in range(args.num_clients):
-            calls.append(make_rpc_call(args, client_id, student_model))
+    for _ in range(epochs):
+        tasks = []
+        for client_id in range(num_clients):
+            task = asyncio.create_task(make_rpc_call(client_id, student_model))
+            tasks.append(task)
         
         # wait on all of the calls
-        updated_student_models = await asyncio.gather(*calls)
+        updated_student_models = await asyncio.gather(*tasks)
+
+        # get rid of any tasks that failed (ie. returned None)
+        valid_student_models = [w for w in updated_student_models if w != None]
+
+        # although rare, its possible for all the calls to fail; in this
+        # case, just move onto the next epoch.
+        if len(valid_student_models) == 0:
+            continue
 
         # average the weights and load into the student model
-        avg_student_model = average_weights(updated_student_models)
+        avg_student_model = average_weights(valid_student_models)
         student_model.load_state_dict(avg_student_model)
 
 if __name__ == '__main__':
-
-    # parse command line arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--num_clients', type=int, default=24)
-    parser.add_argument('--device', type=str, required=True, choices=['cpu', 'cuda', 'mps'])
-    parser.add_argument('--lr', type=float, default=0.01)
-    parser.add_argument('--s_lr', type=float, required=False, default=0.01)
-    parser.add_argument('--weight_decay', type=float, default=1e-4)
-    parser.add_argument('--s_weight_decay', type=float, required=False, default=1e-4)
-    parser.add_argument('--momentum', type=float, default=0.9)
-    parser.add_argument('--s_momentum', type=float, required=False, default=0.9)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--bs', type=int, default=64)
-    parser.add_argument('--local_ep', type=int, default=7)
-    args = parser.parse_args()
-
     # training
-    main(args)
+    asyncio.run(main())
