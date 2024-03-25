@@ -7,7 +7,7 @@ from models.vgg import *
 from torchvision import datasets
 from torchvision.transforms import transforms
 from torch.utils.data import random_split, DataLoader
-from typing import Dict, Any
+from typing import Dict
 from utils.loading import DatasetSplit
 from utils.training import distill
 import os
@@ -16,15 +16,24 @@ import json
 
 class Request(BaseModel):
     student_model: str # base 64 encoding of the model
-    args: Dict[str, Any]
 
 app = FastAPI()
 
 @app.get("/rpc")
 def fl_round(request: Request) -> Dict[str, str]:
+    
+    # load environment variables (initialized in main.py)
+    device = os.environ["device"]
+    s_lr = float(os.environ["s_lr"])
+    s_momentum = float(os.environ["s_momentum"])
+    s_weight_decay = float(os.environ["s_weight_decay"])
+    lr = float(os.environ["lr"])
+    momentum = float(os.environ["momentum"])
+    weight_decay = float(os.environ["weight_decay"])
+    local_ep = int(os.environ["local_ep"])
+    bs = int(os.environ["bs"])
+
     # load student model
-    args = request.args
-    device = args["device"]
     student_model.load_state_dict(deserialize_model(request.student_model, device))
 
     # training
@@ -33,19 +42,19 @@ def fl_round(request: Request) -> Dict[str, str]:
     model.train()
     student_optimizer = torch.optim.SGD(
         student_model.parameters(), 
-        args["s_lr"], 
-        momentum=args["s_momentum"], 
-        weight_decay=args["s_weight_decay"]
+        s_lr, 
+        s_momentum, 
+        s_weight_decay,
     )
     model_optimizer = torch.optim.SGD(
         student_model.parameters(), 
-        args["lr"], 
-        momentum=args["momentum"], 
-        weight_decay=args["weight_decay"]
+        lr, 
+        momentum, 
+        weight_decay,
     )
-    trainloader = DataLoader(DatasetSplit(trainset, dataset_indices), batch_size=args["bs"], shuffle=True)
+    trainloader = DataLoader(DatasetSplit(trainset, dataset_indices), batch_size=bs, shuffle=True)
 
-    for _ in range(args["local_ep"]):
+    for _ in range(local_ep):
         for _, (X, y) in enumerate(trainloader):
             X, y = X.to(device), y.to(device)
 
@@ -104,8 +113,10 @@ if __name__ == '__main__':
     )
 
     # split evaluation dataset into test and validation datasets
-    prg = torch.Generator().manual_seed(int(os.environ['seed']))
+    prg = torch.Generator().manual_seed(int(os.environ["seed"]))
     valset, testset = random_split(evaluation_set, [0.5, 0.5], prg)
 
     # start the server
-    uvicorn.run(app, host=os.environ['ip'], port=os.environ['base_port']+args.client_id+1)
+    ip = os.environ["ip"]
+    port = f"{int(os.environ["base_port"]) + args.client_id + 1}"
+    uvicorn.run(app, host=ip, port=port)
