@@ -1,6 +1,6 @@
 import uvicorn
 import argparse
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 from serialization import *
 from models.vgg import *
@@ -61,7 +61,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--client_id', type=int, required=True)
     parser.add_argument('--vgg', type=int, required=True, choices=[11, 13, 16, 19])
-    parser.add_argument('--splits_file', type=str, required=True)
     args = parser.parse_args()
 
     # store the global references
@@ -102,3 +101,6 @@ if __name__ == '__main__':
     # split evaluation dataset into test and validation datasets
     prg = torch.Generator().manual_seed(int(os.environ['seed']))
     valset, testset = random_split(evaluation_set, [0.5, 0.5], prg)
+
+    # start the server
+    uvicorn.run(app, host=os.environ['ip'], port=os.environ['base_port']+args.client_id+1)
