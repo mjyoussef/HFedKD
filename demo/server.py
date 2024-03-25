@@ -5,6 +5,7 @@ import torch.nn as nn
 from models.vgg import vggStudent
 from serialization import *
 from utils.training import average_weights
+import os
 
 async def make_rpc_call(
         args: argparse.Namespace, 
@@ -12,8 +13,10 @@ async def make_rpc_call(
         student_model: nn.Module,
     ) -> nn.Module:
 
-    url = f"http://127.0.0.1:${8000 + client_id + 1}/rpc"
+    url = f"http://{os.environ['ip']}:{os.environ['base_port'] + client_id + 1}/rpc"
+
     client_args = {
+        "device": args.device,
         "lr": args.lr,
         "s_lr": args.s_lr,
         "momentum": args.momentum,
@@ -26,8 +29,8 @@ async def make_rpc_call(
 
     async with httpx.AsyncClient() as client:
         # serialize and send to the client
-        data_b64 = serialize_to_b64(student_model, client_args)
-        response = await client.post(url, json={"data": data_b64, "device": args.device})
+        data_b64 = serialize_model(student_model)
+        response = await client.post(url, json={"student_model": data_b64, "args": client_args})
         
         # make sure the response was successful
         response.raise_for_status()
@@ -36,8 +39,8 @@ async def make_rpc_call(
         # we'll pass these into FedAvg and use the resulting student model
         # in future rounds of FL)
         response_data = await response.json()
-        return deserialize_model(response_data.get("student_model"), args.device)
-
+        student_model_weights = deserialize_model(response_data.get("student_model"), args.device)
+        return student_model_weights
     
 async def main(args):
     student_model = vggStudent()

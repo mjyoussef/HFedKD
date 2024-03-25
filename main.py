@@ -309,64 +309,6 @@ def write_outputs(
 
 ############################ TRAINING LOOPS ############################
 
-def prepare_CIFAR10(
-        args: argparse.Namespace
-    ) -> Tuple[Dict, Dict, Dict, Dict, Dataset, Dataset, Dataset]:
-
-    '''Allocates models and training samples to clients and returns training,
-    validation, test datasets for the CIFAR10 dataset.'''
-
-    # assign models to clients
-    groups, group_sizes, user_models = create_groups_vgg(args.num_clients)
-
-    transform = transforms.Compose(
-        [transforms.ToTensor(), 
-         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-    trainset = datasets.CIFAR10(
-        root="data",
-        train=True,
-        download=True,
-        transform=transform,
-    )
-
-    evaluation_set = datasets.CIFAR10(
-        root="data",
-        train=False,
-        download=True,
-        transform=transform,
-    )
-
-    # allocate training samples to clients in a non-iid fashion
-    clients_dict = create_client_config(args.num_clients, trainset, 'CIFAR10')
-
-    # split evaluation dataset into test and validation datasets
-    prg = torch.Generator().manual_seed(int(os.environ['seed']))
-    valset, testset = random_split(evaluation_set, [0.5, 0.5], prg)
-
-    return groups, group_sizes, user_models, clients_dict, trainset, valset, testset
-
-def prepare_AG_NEWS(
-        args: argparse.Namespace
-    ) -> Tuple[Dict, Dict, Dict, Dict, Dataset, Dataset, Dataset, int]:
-
-    '''Allocates models and training samples to clients and returns training,
-    validation, test datasets for the AG_NEWS dataset.'''
-
-    # load AG News training and evaluation datasets
-    trainset = AGNEWS('data/ag_train.csv', 'data/alphabet.json')
-    evaluation_set = AGNEWS('data/ag_test.csv', 'data/alphabet.json')
-    in_channels = trainset.alphabet_size
-
-    # assign models to clients
-    clients_dict = create_client_config(args.num_clients, trainset, 'AG_NEWS')
-    groups, group_sizes, user_models = create_groups_char_cnn(args.num_clients, in_channels)
-
-    prg = torch.Generator().manual_seed(int(os.environ['seed']))
-    valset, testset = random_split(evaluation_set, [0.5, 0.5], prg)
-
-    return groups, group_sizes, user_models, clients_dict, trainset, valset, testset, in_channels
-
 def main(
         args: argparse.Namespace, 
         groups: Dict[int, int], 
